@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>提词增强</title>
+    <title>提示词增强</title>
     <style>
       :root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
       body { margin: 0; padding: 16px; color: var(--foreground, inherit); background: var(--background, transparent); }
@@ -19,20 +19,41 @@
       #status[data-kind="error"] { color: var(--destructive, #c33); }
       details { border-top: 1px solid var(--border, #8888); padding-top: 10px; }
       input[type="number"] { width: 8rem; padding: 6px; }
+      #history { display: grid; gap: 8px; border-top: 1px solid var(--border, #8888); padding-top: 10px; }
+      #history h2 { margin: 0; font-size: 1rem; }
+      #history-empty { margin: 0; opacity: .7; }
+      /* One row height in one place: the visible window is exactly three rows,
+         and the fourth scrolls. Change --row-height and the window follows. */
+      #history-list { --row-gap: 6px; --row-height: 4.05rem; display: grid; gap: var(--row-gap); max-height: calc(3 * var(--row-height) + 2 * var(--row-gap)); overflow-y: auto; overscroll-behavior: contain; }
+      .history-row { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; height: var(--row-height); padding: 8px 10px; border: 1px solid var(--border, #8888); border-radius: 8px; }
+      .history-text { margin: 0; font-size: .92em; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+      .history-text[data-kind="draft"] { font-weight: 600; }
+      .history-text[data-kind="result"] { color: var(--muted-foreground, inherit); }
+      .history-actions { display: flex; gap: 6px; }
+      .history-actions button { padding: 4px 8px; font-size: .85em; white-space: nowrap; }
+      /* Narrow: the two texts share the width and the actions move to their own
+         line, so the row grows and the three-row window grows with it. */
+      @media (max-width: 520px) {
+        #history-list { --row-height: 6.1rem; }
+        .history-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "draft result" "actions actions"; align-items: start; }
+        .history-text[data-kind="draft"] { grid-area: draft; }
+        .history-text[data-kind="result"] { grid-area: result; }
+        .history-actions { grid-area: actions; justify-content: flex-end; }
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>提词增强</h1>
-      <label for="draft">待增强的提词</label>
-      <textarea id="draft" placeholder="请输入或粘贴提词……"></textarea>
+      <h1>提示词增强</h1>
+      <label for="draft">待增强的提示词</label>
+      <textarea id="draft" placeholder="请输入或粘贴提示词……"></textarea>
       <div id="actions">
-        <button id="enhance" type="button">增强提词</button>
+        <button id="enhance" type="button">增强提示词</button>
         <div id="cleanup-actions">
           <button id="copy" type="button" disabled>复制增强结果</button>
-          <button id="clear-result" type="button" disabled>清空结果</button>
-          <button id="clear-draft" type="button" disabled>清空草稿</button>
-          <button id="clear-all" type="button" disabled>一键清理</button>
+          <button id="clear-result" type="button">清空结果</button>
+          <button id="clear-draft" type="button">清空草稿</button>
+          <button id="clear-all" type="button">一键清理</button>
         </div>
       </div>
       <div id="status" role="status" aria-live="polite"></div>
@@ -46,6 +67,11 @@
         <input id="tokens" type="number" min="128" max="4000" step="128" />
         <button id="save" type="button">保存设置</button>
       </details>
+      <section id="history" aria-labelledby="history-title">
+        <h2 id="history-title">历史增强词</h2>
+        <p id="history-empty">暂无历史记录；点击“增强提示词”后会记录在这里。</p>
+        <div id="history-list"></div>
+      </section>
     </main>
     <script src="main.js"></script>
   </body>

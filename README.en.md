@@ -16,7 +16,7 @@
 
 The extension manifest registers a standalone panel at `panel/index.html`; the build generates its panel script. The panel generates results with `host.generate()` using the user's configured Small Model and copies them with `host.writeClipboard()`. The extension requires approval for the manifest's declared `model` capability.
 
-The panel supports manually entering a prompt, generating and viewing a result, regenerating it, and saving a custom system prompt and maximum output-token count. The extension does not read or modify the chat composer, inspect conversation history, or send chat messages. The Small Model call does not expose arbitrary provider/model routing, temperature, or reasoning-effort controls.
+The panel supports manually entering a prompt, generating and viewing a result, regenerating it, browsing the history of enhancements, and saving a custom system prompt and maximum output-token count. The extension does not read or modify the chat composer, inspect conversation history, or send chat messages. The Small Model call does not expose arbitrary provider/model routing, temperature, or reasoning-effort controls.
 
 ![Prompt enhancement panel screenshot](https://raw.githubusercontent.com/yhweb/openchamber-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
 
@@ -65,6 +65,14 @@ Approve the extension's `model` capability when OpenChamber prompts you. Other d
 
 The extension does not apply the result to the chat composer or send a message. To use it in a conversation, paste the copied result yourself.
 
+## History
+
+The panel keeps a history at the bottom: the newest 10 entries, newest first, three visible at a time, with the rest reached by scrolling the list.
+
+Every press of **Enhance Prompt** adds an entry immediately, recording the draft first; the generated result fills that entry when the call finishes, and an entry whose call failed or was cleared reads "not generated yet". Each entry offers **Copy Enhanced** (copies that entry's result) and **Delete**.
+
+Entries live in the extension's global storage namespace (key `history`, no project ID), so the list is the same whichever project the panel is opened from; uninstalling the extension removes it with the namespace.
+
 ## Configuration
 
 The panel's **Enhancement Settings** contains the following options, saved in extension storage:
@@ -105,7 +113,7 @@ Reopen the panel and check whether the settings persisted. If the problem contin
 ```text
 package.json       OpenChamber manifest, panel entry, and model capability
 panel/index.html   Standalone panel UI
-panel/main.ts      Panel interactions, model call, clipboard, and settings storage
+panel/main.ts      Panel interactions, model call, clipboard, settings, and history storage
 src/prompts.ts     Built-in prompt strategy
 scripts/build.mjs  Builds the panel and other package entries
 ```

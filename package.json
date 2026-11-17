@@ -6,7 +6,7 @@
     "apiVersion": 1,
     "engines": { "openchamber": ">=2.7.0" },
     "id": "dsh-prompt-enhance",
-    "name": "提词增强",
+    "name": "提示词增强",
     "icon": "sparkling-2",
     "contributes": {
       "panel": { "entry": "panel/index.html" },

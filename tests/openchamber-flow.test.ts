@@ -37,6 +37,10 @@ function renderPanel(): void {
     <textarea id="system"></textarea>
     <input id="tokens" />
     <button id="save"></button>
+    <section id="history">
+      <p id="history-empty"></p>
+      <div id="history-list"></div>
+    </section>
   `
 }
 
@@ -50,12 +54,12 @@ describe('OpenChamber panel flow', () => {
     renderPanel()
   })
 
-  it('declares Simplified Chinese and the 提词增强 display name', () => {
+  it('declares Simplified Chinese and the 提示词增强 display name', () => {
     const html = readFileSync('panel/index.html', 'utf8')
     const manifest = JSON.parse(readFileSync('package.json', 'utf8'))
     expect(html).toContain('<html lang="zh-CN">')
-    expect(html).toContain('<title>提词增强</title>')
-    expect(manifest.openchamber.name).toBe('提词增强')
+    expect(html).toContain('<title>提示词增强</title>')
+    expect(manifest.openchamber.name).toBe('提示词增强')
   })
 
   it('generates from the manual draft and renders the result', async () => {
@@ -77,7 +81,7 @@ describe('OpenChamber panel flow', () => {
     await import('../panel/main.ts')
     document.querySelector<HTMLButtonElement>('#enhance')!.click()
     expect(host.generate).not.toHaveBeenCalled()
-    expect(document.querySelector('#status')?.textContent).toContain('请输入需要增强的提词')
+    expect(document.querySelector('#status')?.textContent).toContain('请输入需要增强的提示词')
   })
 
   it('keeps the draft and exposes a retry after generation failure', async () => {
@@ -86,8 +90,8 @@ describe('OpenChamber panel flow', () => {
     const draft = document.querySelector<HTMLTextAreaElement>('#draft')!
     draft.value = 'keep this draft'
     document.querySelector<HTMLButtonElement>('#enhance')!.click()
-    await vi.waitFor(() => expect(document.querySelector('#status')?.textContent).toContain('提词增强失败'))
-    expect(document.querySelector('#status')?.textContent).toContain('原始提词未改变，可以重试')
+    await vi.waitFor(() => expect(document.querySelector('#status')?.textContent).toContain('提示词增强失败'))
+    expect(document.querySelector('#status')?.textContent).toContain('原始提示词未改变，可以重试')
     expect(draft.value).toBe('keep this draft')
     expect(document.querySelector<HTMLButtonElement>('#enhance')!.disabled).toBe(false)
   })
@@ -122,7 +126,7 @@ describe('OpenChamber panel flow', () => {
     await vi.waitFor(() => expect(document.querySelector('#result')?.textContent).toBe('old result'))
     draft.value = 'new draft'
     draft.dispatchEvent(new Event('input'))
-    expect(document.querySelector('#status')?.textContent).toBe('提词已更改；当前显示的结果对应先前的提词。')
+    expect(document.querySelector('#status')?.textContent).toBe('提示词已更改；当前显示的结果对应先前的提示词。')
   })
 
   it('does not let an older response replace a newer result', async () => {

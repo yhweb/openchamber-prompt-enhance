@@ -16,7 +16,7 @@
 
 扩展清单注册独立面板入口 `panel/index.html`，面板脚本由构建生成。扩展使用 `host.generate()` 请求用户配置的 Small Model，并通过 `host.writeClipboard()` 复制结果；安装时需要批准清单声明的 `model` 能力。
 
-面板允许手动输入提示词、生成和查看结果、重新生成，以及保存自定义系统提示词和最大输出 token 数。扩展不读取或修改聊天输入框，不读取会话历史，也不发送聊天消息。Small Model 调用不提供任意 provider/model 路由、temperature 或 reasoning-effort 控制。
+面板允许手动输入提示词、生成和查看结果、重新生成、查看历史增强词，以及保存自定义系统提示词和最大输出 token 数。扩展不读取或修改聊天输入框，不读取会话历史，也不发送聊天消息。Small Model 调用不提供任意 provider/model 路由、temperature 或 reasoning-effort 控制。
 
 ![提示词增强面板截图](https://raw.githubusercontent.com/yhweb/openchamber-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
 
@@ -57,13 +57,21 @@ npm run build
 
 ## 使用方法
 
-1. 在 OpenChamber 中打开“提词增强”扩展面板。
+1. 在 OpenChamber 中打开“提示词增强”扩展面板。
 2. 在输入框中输入或粘贴需要增强的提示词。
-3. 点击“增强提词”，等待面板显示结果；如需再生成一次，点击“增强提词”。
+3. 点击“增强提示词”，等待面板显示结果；如需再生成一次，点击“增强提示词”。
 4. 检查结果并点击“复制增强结果”，将结果复制到系统剪贴板。
 5. 展开“增强设置”可编辑系统提示词和最大输出令牌数，然后保存。
 
 扩展不会自动把结果应用到聊天输入框或发送消息。需要在对话中使用时，请自行粘贴复制的结果。
+
+## 历史增强词
+
+面板底部保留历史记录：全局最新 10 条，最新的排在最上面；列表固定显示 3 条，超过 3 条后在列表内部滚动。
+
+每次点击“增强提示词”都会立即新增一条，先记下待增强的提示词；生成完成后填入增强结果，失败或中途清空则显示“尚未生成”。每条记录提供“复制增强”（复制该条的增强结果）和“删除本条”。
+
+记录保存在扩展存储的全局命名空间（键 `history`，不含项目 ID），因此在任何项目下打开面板看到的都是同一份列表；卸载扩展会随命名空间一起删除。
 
 ## 配置
 
@@ -105,7 +113,7 @@ npm run build
 ```text
 package.json       OpenChamber 扩展清单、面板入口与 model 能力声明
 panel/index.html   独立面板界面
-panel/main.ts      面板交互、Small Model 调用、剪贴板与设置存取
+panel/main.ts      面板交互、Small Model 调用、剪贴板、设置与历史记录存取
 src/prompts.ts     内置提示词策略
 scripts/build.mjs  构建面板及包内其他入口
 ```

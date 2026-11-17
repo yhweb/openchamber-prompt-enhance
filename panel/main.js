@@ -2031,20 +2031,189 @@ ${safe}
     maxOutputTokens: 2048
   };
   var SETTINGS_KEY = "settings";
+  var HISTORY_KEY = "history";
+  var HISTORY_LIMIT = 10;
+  var HISTORY_FIELD_LIMIT = 8e3;
+  var HISTORY_BYTES_LIMIT = 60 * 1024;
   var host = connectHost();
   var draft = document.querySelector("#draft");
   var result = document.querySelector("#result");
   var status = document.querySelector("#status");
   var enhanceButton = document.querySelector("#enhance");
   var copyButton = document.querySelector("#copy");
+  var clearResultButton = document.querySelector("#clear-result");
+  var clearDraftButton = document.querySelector("#clear-draft");
+  var clearAllButton = document.querySelector("#clear-all");
   var systemInput = document.querySelector("#system");
   var tokensInput = document.querySelector("#tokens");
   var saveButton = document.querySelector("#save");
+  var historyList = document.querySelector("#history-list");
+  var historyEmpty = document.querySelector("#history-empty");
   var settings = DEFAULT_SETTINGS;
+  var historyEntries = [];
   var requestId = 0;
+  var requestInFlight = false;
+  var pendingHistoryId = null;
   function setStatus(message, kind = "info") {
     status.textContent = message;
     status.dataset.kind = kind;
+  }
+  function updateActionStates() {
+    const hasResult = Boolean(result.textContent);
+    clearResultButton.disabled = requestInFlight;
+    clearDraftButton.disabled = requestInFlight;
+    clearAllButton.disabled = requestInFlight;
+    copyButton.disabled = requestInFlight || !hasResult;
+  }
+  function invalidateRequest() {
+    requestId += 1;
+    requestInFlight = false;
+    pendingHistoryId = null;
+    enhanceButton.disabled = false;
+    renderHistory();
+  }
+  function clearResult() {
+    invalidateRequest();
+    result.textContent = "";
+    updateActionStates();
+    setStatus("\u5DF2\u6E05\u7A7A\u589E\u5F3A\u7ED3\u679C\u3002");
+  }
+  function clearDraft() {
+    invalidateRequest();
+    draft.value = "";
+    updateActionStates();
+    setStatus("\u5DF2\u6E05\u7A7A\u8349\u7A3F\u3002");
+  }
+  function clearAll() {
+    invalidateRequest();
+    result.textContent = "";
+    draft.value = "";
+    updateActionStates();
+    setStatus("\u5DF2\u6E05\u7A7A\u8349\u7A3F\u548C\u589E\u5F3A\u7ED3\u679C\u3002");
+  }
+  function newHistoryId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+  function clipField(text) {
+    return text.length > HISTORY_FIELD_LIMIT ? `${text.slice(0, HISTORY_FIELD_LIMIT)}\u2026` : text;
+  }
+  function byteLength(value) {
+    return new TextEncoder().encode(value).length;
+  }
+  function fitHistory(entries) {
+    const fitted = entries.slice(0, HISTORY_LIMIT).map((entry) => ({
+      ...entry,
+      draft: clipField(entry.draft),
+      result: clipField(entry.result)
+    }));
+    while (fitted.length > 1 && byteLength(JSON.stringify(fitted)) > HISTORY_BYTES_LIMIT) fitted.pop();
+    return fitted;
+  }
+  function sanitizeHistory(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    const entries = [];
+    for (const item of value) {
+      if (typeof item !== "object" || item === null) continue;
+      const candidate = item;
+      if (typeof candidate.id !== "string" || candidate.id === "" || seen.has(candidate.id)) continue;
+      if (typeof candidate.draft !== "string" || candidate.draft.trim() === "") continue;
+      seen.add(candidate.id);
+      entries.push({
+        id: candidate.id,
+        draft: candidate.draft,
+        result: typeof candidate.result === "string" ? candidate.result : "",
+        at: typeof candidate.at === "number" && Number.isFinite(candidate.at) ? candidate.at : 0
+      });
+    }
+    return fitHistory(entries);
+  }
+  async function persistHistory() {
+    try {
+      await host.storage.set(HISTORY_KEY, historyEntries);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
+      setStatus(`\u5386\u53F2\u8BB0\u5F55\u4FDD\u5B58\u5931\u8D25\uFF08${message}\uFF09\u3002`, "error");
+    }
+  }
+  function historyRow(entry) {
+    const row = document.createElement("div");
+    row.className = "history-row";
+    row.dataset.id = entry.id;
+    const draftText = document.createElement("p");
+    draftText.className = "history-text";
+    draftText.dataset.kind = "draft";
+    draftText.textContent = entry.draft;
+    draftText.title = entry.draft;
+    const resultText = document.createElement("p");
+    resultText.className = "history-text";
+    resultText.dataset.kind = "result";
+    resultText.textContent = entry.result !== "" ? entry.result : pendingHistoryId === entry.id ? "\uFF08\u751F\u6210\u4E2D\u2026\uFF09" : "\uFF08\u5C1A\u672A\u751F\u6210\uFF09";
+    if (entry.result !== "") resultText.title = entry.result;
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+    const copyAction = document.createElement("button");
+    copyAction.type = "button";
+    copyAction.dataset.action = "copy";
+    copyAction.textContent = "\u590D\u5236\u589E\u5F3A";
+    copyAction.disabled = entry.result === "";
+    copyAction.addEventListener("click", () => {
+      void copyHistoryResult(entry);
+    });
+    const deleteAction = document.createElement("button");
+    deleteAction.type = "button";
+    deleteAction.dataset.action = "delete";
+    deleteAction.textContent = "\u5220\u9664\u672C\u6761";
+    deleteAction.addEventListener("click", () => {
+      void deleteHistoryEntry(entry.id);
+    });
+    actions.append(copyAction, deleteAction);
+    row.append(draftText, resultText, actions);
+    return row;
+  }
+  function renderHistory() {
+    historyList.replaceChildren(...historyEntries.map(historyRow));
+    historyEmpty.hidden = historyEntries.length > 0;
+  }
+  function addHistoryEntry(text) {
+    const entry = { id: newHistoryId(), draft: text, result: "", at: Date.now() };
+    historyEntries = fitHistory([entry, ...historyEntries]);
+    pendingHistoryId = entry.id;
+    renderHistory();
+    void persistHistory();
+    return entry;
+  }
+  function completeHistoryEntry(id, text) {
+    historyEntries = fitHistory(historyEntries.map((entry) => entry.id === id ? { ...entry, result: text } : entry));
+    pendingHistoryId = null;
+    renderHistory();
+    void persistHistory();
+  }
+  async function copyHistoryResult(entry) {
+    if (entry.result === "") return;
+    try {
+      await host.writeClipboard(entry.result);
+      setStatus("\u5DF2\u590D\u5236\u5386\u53F2\u589E\u5F3A\u7ED3\u679C\u3002");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
+      setStatus(`\u590D\u5236\u5931\u8D25\uFF08${message}\uFF09\u3002\u5386\u53F2\u8BB0\u5F55\u672A\u6539\u53D8\u3002`, "error");
+    }
+  }
+  async function deleteHistoryEntry(id) {
+    historyEntries = historyEntries.filter((entry) => entry.id !== id);
+    if (pendingHistoryId === id) pendingHistoryId = null;
+    renderHistory();
+    await persistHistory();
+    setStatus("\u5DF2\u5220\u9664\u8FD9\u6761\u5386\u53F2\u8BB0\u5F55\u3002");
+  }
+  async function loadHistory() {
+    try {
+      historyEntries = sanitizeHistory(await host.storage.get(HISTORY_KEY));
+    } catch {
+      historyEntries = [];
+      setStatus("\u65E0\u6CD5\u8BFB\u53D6\u5386\u53F2\u8BB0\u5F55\uFF0C\u5F53\u524D\u5217\u8868\u4E3A\u7A7A\u3002", "error");
+    }
+    renderHistory();
   }
   function sanitizeSettings(value) {
     if (typeof value !== "object" || value === null) return DEFAULT_SETTINGS;
@@ -2070,13 +2239,15 @@ ${safe}
   async function enhance() {
     const text = draft.value;
     if (!text.trim()) {
-      setStatus("\u8BF7\u8F93\u5165\u9700\u8981\u589E\u5F3A\u7684\u63D0\u8BCD\u3002", "error");
+      setStatus("\u8BF7\u8F93\u5165\u9700\u8981\u589E\u5F3A\u7684\u63D0\u793A\u8BCD\u3002", "error");
       return;
     }
+    const entry = addHistoryEntry(text);
     const currentRequest = ++requestId;
+    requestInFlight = true;
     enhanceButton.disabled = true;
-    copyButton.disabled = true;
-    setStatus("\u6B63\u5728\u4F7F\u7528\u5C0F\u6A21\u578B\u589E\u5F3A\u63D0\u8BCD\u2026\u2026");
+    updateActionStates();
+    setStatus("\u6B63\u5728\u4F7F\u7528\u5C0F\u6A21\u578B\u589E\u5F3A\u63D0\u793A\u8BCD\u2026\u2026");
     try {
       const response = await host.generate({
         prompt: frameUserPrompt(text),
@@ -2085,19 +2256,28 @@ ${safe}
       });
       if (currentRequest !== requestId) return;
       result.textContent = response.text;
-      copyButton.disabled = !response.text;
-      setStatus("\u63D0\u8BCD\u589E\u5F3A\u5B8C\u6210\u3002");
+      completeHistoryEntry(entry.id, response.text);
+      updateActionStates();
+      setStatus("\u63D0\u793A\u8BCD\u589E\u5F3A\u5B8C\u6210\u3002");
     } catch (error) {
       if (currentRequest !== requestId) return;
+      completeHistoryEntry(entry.id, "");
       const message = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
-      setStatus(`\u63D0\u8BCD\u589E\u5F3A\u5931\u8D25\uFF08${message}\uFF09\u3002\u539F\u59CB\u63D0\u8BCD\u672A\u6539\u53D8\uFF0C\u53EF\u4EE5\u91CD\u8BD5\u3002`, "error");
+      setStatus(`\u63D0\u793A\u8BCD\u589E\u5F3A\u5931\u8D25\uFF08${message}\uFF09\u3002\u539F\u59CB\u63D0\u793A\u8BCD\u672A\u6539\u53D8\uFF0C\u53EF\u4EE5\u91CD\u8BD5\u3002`, "error");
     } finally {
-      if (currentRequest === requestId) enhanceButton.disabled = false;
+      if (currentRequest === requestId) {
+        requestInFlight = false;
+        enhanceButton.disabled = false;
+        updateActionStates();
+      }
     }
   }
   enhanceButton.addEventListener("click", () => {
     void enhance();
   });
+  clearResultButton.addEventListener("click", clearResult);
+  clearDraftButton.addEventListener("click", clearDraft);
+  clearAllButton.addEventListener("click", clearAll);
   copyButton.addEventListener("click", async () => {
     try {
       await host.writeClipboard(result.textContent ?? "");
@@ -2124,10 +2304,14 @@ ${safe}
     }
   });
   draft.addEventListener("input", () => {
-    if (result.textContent) setStatus("\u63D0\u8BCD\u5DF2\u66F4\u6539\uFF1B\u5F53\u524D\u663E\u793A\u7684\u7ED3\u679C\u5BF9\u5E94\u5148\u524D\u7684\u63D0\u8BCD\u3002");
+    if (result.textContent) setStatus("\u63D0\u793A\u8BCD\u5DF2\u66F4\u6539\uFF1B\u5F53\u524D\u663E\u793A\u7684\u7ED3\u679C\u5BF9\u5E94\u5148\u524D\u7684\u63D0\u793A\u8BCD\u3002");
+    updateActionStates();
   });
   host.onReady((ctx) => {
     applyHostReady(ctx, document.documentElement);
   });
   void loadSettings();
+  void loadHistory();
+  renderHistory();
+  updateActionStates();
 })();
