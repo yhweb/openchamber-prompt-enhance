@@ -1,14 +1,24 @@
 # dsh-prompt-enhance
 
-[![CI](https://github.com/rongxingda/dsh-prompt-enhance/actions/workflows/ci.yml/badge.svg)](https://github.com/rongxingda/dsh-prompt-enhance/actions/workflows/ci.yml)
+[![CI](https://github.com/yhweb/openchamber-prompt-enhance/actions/workflows/ci.yml/badge.svg)](https://github.com/yhweb/openchamber-prompt-enhance/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-prompt-enhance)](https://www.npmjs.com/package/dsh-prompt-enhance)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
-**Prompt enhancement for the [DeepSeek Harness](https://github.com/deepseek-ai) web GUI** — one click turns a rough composer draft into a well-structured prompt: explicit role and goal, executable steps, output format, acceptance criteria, and edge cases. Your intent is never changed, nothing is fabricated, and the original draft is always preserved.
+**Prompt enhancement as a private, standalone [OpenChamber](https://github.com/openchamber/openchamber) panel.** Enter a draft, generate a structured rewrite with your configured Small Model, review it, regenerate, or copy it. The draft and result are never sent into a session.
 
 English | [简体中文](./README.zh-CN.md)
 
+> **Repository scope:** This repository is the OpenChamber extension edition of `dsh-prompt-enhance`. The original DeepSeek Harness plugin remains maintained in [rongxingda/dsh-prompt-enhance](https://github.com/rongxingda/dsh-prompt-enhance); this repository focuses on the standalone OpenChamber panel. The OpenChamber edition builds on the original project. Thanks to [Rongxingda](https://github.com/rongxingda) for creating and maintaining the original plugin.
+
 ---
+
+## OpenChamber extension
+
+Build with `npm ci && npm run build`, then install this folder from **Settings → Extensions** in OpenChamber. The package manifest registers `panel/index.html`; the build creates its classic `panel/main.js` bundle. Approve the **Use your Small Model** capability when prompted.
+
+The panel supports manual input, result preview, regeneration, copying, and saved settings for the system prompt and output-token limit. Generation uses OpenChamber's `host.generate()` and copying uses `host.writeClipboard()`. It does not read or change the chat composer, inspect session history, or send messages. The standard API selects the user's Small Model; arbitrary provider/model routing, temperature, and reasoning-effort controls are not available.
+
+The existing DSH plugin entry points remain in this package for compatibility; the OpenChamber panel is a separate interface and does not rely on them.
 
 ## Why
 
@@ -28,7 +38,7 @@ Good agent prompts state *who the model should be*, *what to deliver*, *in what 
 | ⚙️ **Live settings** | Every knob (model override, temperature, budgets, system prompt, shortcut) hot-applies from Settings → 插件配置 |
 | 🛡️ **Draft safety** | Empty, over-length, images-only, and command-chip inputs are rejected locally; upstream failures are mapped to readable messages; the draft is never mutated on failure |
 
-![The preview panel running in dsh web: original and enhanced prompt side by side with model info, fill-back and copy actions](https://raw.githubusercontent.com/rongxingda/dsh-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
+![The preview panel running in dsh web: original and enhanced prompt side by side with model info, fill-back and copy actions](https://raw.githubusercontent.com/yhweb/openchamber-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
 
 ## How it works
 

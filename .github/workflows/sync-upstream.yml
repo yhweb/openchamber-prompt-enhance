@@ -1,0 +1,45 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream changes into a sync branch
+        run: |
+          git remote add upstream https://github.com/rongxingda/dsh-prompt-enhance.git
+          git fetch upstream main
+          git checkout -B sync/upstream-main origin/main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "No upstream commits to sync."
+            exit 0
+          fi
+          git merge --no-edit upstream/main
+
+      - name: Push branch and open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet origin/main...HEAD; then
+            echo "No changes to propose."
+            exit 0
+          fi
+          git push --force-with-lease origin sync/upstream-main
+          gh pr create \
+            --base main \
+            --head sync/upstream-main \
+            --title "Sync updates from the original dsh-prompt-enhance repository" \
+            --body "Imports changes from https://github.com/rongxingda/dsh-prompt-enhance. Review OpenChamber compatibility before merging." \
+            || gh pr view sync/upstream-main

@@ -1,14 +1,24 @@
 # dsh-prompt-enhance
 
-[![CI](https://github.com/rongxingda/dsh-prompt-enhance/actions/workflows/ci.yml/badge.svg)](https://github.com/rongxingda/dsh-prompt-enhance/actions/workflows/ci.yml)
+[![CI](https://github.com/yhweb/openchamber-prompt-enhance/actions/workflows/ci.yml/badge.svg)](https://github.com/yhweb/openchamber-prompt-enhance/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/dsh-prompt-enhance)](https://www.npmjs.com/package/dsh-prompt-enhance)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
-**DeepSeek Harness Web GUI 的「提示词增强」插件** —— 一键把输入框里的草稿改写为结构化提示词:明确的角色与目标、可执行步骤、输出格式、验收标准、边界条件。不改变原意、不凭空编造需求,原文始终保留。
+**作为 OpenChamber 独立面板运行的提示词增强扩展。** 手动输入草稿，使用已配置的 Small Model 生成结构化改写，预览、重新生成或复制结果；草稿和结果都不会发送到会话中。
 
 [English](./README.md) | 简体中文
 
+> **仓库定位：** 本仓库是 `dsh-prompt-enhance` 的 OpenChamber 扩展版本。原版 DeepSeek Harness 插件继续维护在 [rongxingda/dsh-prompt-enhance](https://github.com/rongxingda/dsh-prompt-enhance)；本仓库专注于独立的 OpenChamber 面板。本扩展版本基于原项目开发，感谢 [Rongxingda](https://github.com/rongxingda) 创建并维护原插件。
+
 ---
+
+## OpenChamber 扩展
+
+运行 `npm ci && npm run build` 构建，然后在 OpenChamber 的**设置 → 扩展**中添加此文件夹。清单注册 `panel/index.html`，构建会生成经典脚本 `panel/main.js`。按提示批准 **Use your Small Model** 能力。
+
+面板提供手动输入、结果预览、重新生成、复制，以及系统提示词和输出 token 上限设置。生成通过 `host.generate()` 执行，复制通过 `host.writeClipboard()` 执行。扩展不会读取或改写聊天输入框、查看会话历史或发送消息。标准 API 使用用户配置的 Small Model，不支持任意 provider/model 路由、temperature 或 reasoning-effort 设置。
+
+此包仍保留原有 DSH 插件入口以兼容现有使用方式；OpenChamber 面板是独立界面，不依赖这些入口。
 
 ## 为什么需要它
 
@@ -28,7 +38,7 @@
 | ⚙️ **配置热生效** | 模型覆盖、温度、预算、系统提示词、快捷键,全部在 设置 → 插件配置 即改即用 |
 | 🛡️ **草稿安全** | 空输入、超长、仅图片、含命令块在本地拦截;上游失败映射为可读提示;失败绝不改动草稿 |
 
-![dsh web 中实机运行的预览面板:原文与增强结果并排,含模型信息与回填/复制操作](https://raw.githubusercontent.com/rongxingda/dsh-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
+![dsh web 中实机运行的预览面板:原文与增强结果并排,含模型信息与回填/复制操作](https://raw.githubusercontent.com/yhweb/openchamber-prompt-enhance/main/docs/evidence-prompt-enhance-panel.png)
 
 ## 工作原理
 

@@ -58,14 +58,30 @@ const clientOptions = {
   footer: { js: '\n\t\treturn module.exports;\n\t}\n});\n' },
 }
 
+/** @type {import('esbuild').BuildOptions} */
+const panelOptions = {
+  entryPoints: [resolve(root, 'panel/main.ts')],
+  outfile: resolve(root, 'panel/main.js'),
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2022',
+  sourcemap: false,
+  logLevel: 'info',
+}
+
 const host = await context(hostOptions)
 const client = await context(clientOptions)
+const panel = await context(panelOptions)
 if (watch) {
   await host.watch()
   await client.watch()
+  await panel.watch()
 } else {
   await host.rebuild()
   await client.rebuild()
+  await panel.rebuild()
   await host.dispose()
   await client.dispose()
+  await panel.dispose()
 }

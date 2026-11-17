@@ -16,6 +16,7 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "scripts/**/*.mjs"]
