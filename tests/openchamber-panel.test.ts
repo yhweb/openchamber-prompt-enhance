@@ -237,6 +237,23 @@ describe('OpenChamber extension package', () => {
     expect(html).toMatch(/\.history-text\s*\{[^}]*-webkit-line-clamp:\s*2/)
   })
 
+  it('lets the result fill the dynamic viewport and scroll its own content', async () => {
+    const html = await readFile(resolve(root, 'panel/index.html'), 'utf8')
+    const bodyRule = /body\s*\{([^}]*)\}/.exec(html)?.[1] ?? ''
+    const mainRule = /main\s*\{([^}]*)\}/.exec(html)?.[1] ?? ''
+    const resultRule = /#result\s*\{([^}]*)\}/.exec(html)?.[1] ?? ''
+    const historyRule = /#history-list\s*\{([^}]*)\}/.exec(html)?.[1] ?? ''
+
+    expect(bodyRule).toMatch(/height:\s*100dvh/)
+    expect(mainRule).toMatch(/min-height:\s*0/)
+    expect(mainRule).toMatch(/grid-template-rows:[^;]*minmax\(0,\s*1fr\)/)
+    expect(resultRule).toMatch(/min-height:\s*0/)
+    expect(resultRule).toMatch(/overflow-y:\s*auto/)
+    expect(resultRule).toMatch(/align-self:\s*stretch/)
+    expect(historyRule).toMatch(/max-height:\s*calc\(3 \* var\(--row-height\) \+ 2 \* var\(--row-gap\)\)/)
+    expect(html).toMatch(/@media\s*\(max-width:\s*520px\)/)
+  })
+
   it('disables cleanup actions only while a request is in flight', async () => {
     const pending = deferred<{ text: string }>()
     hostMocks.generate.mockReturnValue(pending.promise)

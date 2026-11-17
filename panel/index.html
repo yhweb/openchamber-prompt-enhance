@@ -6,12 +6,12 @@
     <title>提示词增强</title>
     <style>
       :root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
-      body { margin: 0; padding: 16px; color: var(--foreground, inherit); background: var(--background, transparent); }
-      main { display: grid; gap: 12px; max-width: 900px; margin: auto; }
+      body { box-sizing: border-box; height: 100vh; height: 100dvh; margin: 0; padding: 16px; color: var(--foreground, inherit); background: var(--background, transparent); }
+      main { display: grid; grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) auto auto; gap: 12px; width: 100%; height: 100%; min-height: 0; max-width: 900px; margin: auto; }
       h1 { margin: 0; font-size: 1.15rem; }
       label { display: grid; gap: 6px; font-weight: 600; }
       textarea { box-sizing: border-box; width: 100%; min-height: 130px; resize: vertical; padding: 10px; color: inherit; background: var(--background, transparent); border: 1px solid var(--border, #8888); border-radius: 8px; font: inherit; }
-      #result { min-height: 100px; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border: 1px solid var(--border, #8888); border-radius: 8px; }
+      #result { min-height: 0; align-self: stretch; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border: 1px solid var(--border, #8888); border-radius: 8px; }
       #actions { display: flex; flex-wrap: wrap; gap: 8px; }
       #cleanup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
       button { padding: 8px 12px; border: 1px solid var(--border, #8888); border-radius: 7px; color: inherit; background: var(--background, transparent); cursor: pointer; }
