@@ -26,7 +26,12 @@ function renderPanel(): void {
   document.body.innerHTML = `
     <textarea id="draft"></textarea>
     <button id="enhance"></button>
-    <button id="copy" disabled></button>
+    <div id="cleanup-actions">
+      <button id="copy" disabled></button>
+      <button id="clear-result" disabled></button>
+      <button id="clear-draft" disabled></button>
+      <button id="clear-all" disabled></button>
+    </div>
     <div id="status"></div>
     <div id="result"></div>
     <textarea id="system"></textarea>

@@ -18,15 +18,56 @@ const result = document.querySelector<HTMLDivElement>('#result')!
 const status = document.querySelector<HTMLDivElement>('#status')!
 const enhanceButton = document.querySelector<HTMLButtonElement>('#enhance')!
 const copyButton = document.querySelector<HTMLButtonElement>('#copy')!
+const clearResultButton = document.querySelector<HTMLButtonElement>('#clear-result')!
+const clearDraftButton = document.querySelector<HTMLButtonElement>('#clear-draft')!
+const clearAllButton = document.querySelector<HTMLButtonElement>('#clear-all')!
 const systemInput = document.querySelector<HTMLTextAreaElement>('#system')!
 const tokensInput = document.querySelector<HTMLInputElement>('#tokens')!
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!
 let settings = DEFAULT_SETTINGS
 let requestId = 0
+let requestInFlight = false
 
 function setStatus(message: string, kind: 'info' | 'error' = 'info'): void {
   status.textContent = message
   status.dataset.kind = kind
+}
+
+function updateActionStates(): void {
+  const hasDraft = Boolean(draft.value)
+  const hasResult = Boolean(result.textContent)
+  clearResultButton.disabled = requestInFlight || !hasResult
+  clearDraftButton.disabled = requestInFlight || !hasDraft
+  clearAllButton.disabled = requestInFlight || (!hasDraft && !hasResult)
+  copyButton.disabled = requestInFlight || !hasResult
+}
+
+function invalidateRequest(): void {
+  requestId += 1
+  requestInFlight = false
+  enhanceButton.disabled = false
+}
+
+function clearResult(): void {
+  invalidateRequest()
+  result.textContent = ''
+  updateActionStates()
+  setStatus('已清空增强结果。')
+}
+
+function clearDraft(): void {
+  invalidateRequest()
+  draft.value = ''
+  updateActionStates()
+  setStatus('已清空草稿。')
+}
+
+function clearAll(): void {
+  invalidateRequest()
+  result.textContent = ''
+  draft.value = ''
+  updateActionStates()
+  setStatus('已清空草稿和增强结果。')
 }
 
 function sanitizeSettings(value: unknown): EnhancerSettings {
@@ -64,8 +105,9 @@ async function enhance(): Promise<void> {
     return
   }
   const currentRequest = ++requestId
+  requestInFlight = true
   enhanceButton.disabled = true
-  copyButton.disabled = true
+  updateActionStates()
   setStatus('正在使用小模型增强提词……')
   try {
     const response = await host.generate({
@@ -75,18 +117,25 @@ async function enhance(): Promise<void> {
     })
     if (currentRequest !== requestId) return
     result.textContent = response.text
-    copyButton.disabled = !response.text
+    updateActionStates()
     setStatus('提词增强完成。')
   } catch (error) {
     if (currentRequest !== requestId) return
     const message = error instanceof Error ? error.message : '未知错误'
     setStatus(`提词增强失败（${message}）。原始提词未改变，可以重试。`, 'error')
   } finally {
-    if (currentRequest === requestId) enhanceButton.disabled = false
+    if (currentRequest === requestId) {
+      requestInFlight = false
+      enhanceButton.disabled = false
+      updateActionStates()
+    }
   }
 }
 
 enhanceButton.addEventListener('click', () => { void enhance() })
+clearResultButton.addEventListener('click', clearResult)
+clearDraftButton.addEventListener('click', clearDraft)
+clearAllButton.addEventListener('click', clearAll)
 copyButton.addEventListener('click', async () => {
   try {
     await host.writeClipboard(result.textContent ?? '')
@@ -114,6 +163,7 @@ saveButton.addEventListener('click', async () => {
 })
 draft.addEventListener('input', () => {
   if (result.textContent) setStatus('提词已更改；当前显示的结果对应先前的提词。')
+  updateActionStates()
 })
 
 host.onReady((ctx) => {
@@ -121,3 +171,4 @@ host.onReady((ctx) => {
 })
 
 void loadSettings()
+updateActionStates()
