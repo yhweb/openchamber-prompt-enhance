@@ -23,6 +23,8 @@ permissions:
 
 jobs:
   publish:
+    # This repository is the OpenChamber edition, not the upstream npm package.
+    if: github.repository == 'rongxingda/dsh-prompt-enhance'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
