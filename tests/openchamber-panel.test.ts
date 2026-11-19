@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { DEFAULT_SYSTEM_PROMPT } from '../src/prompts'
 
 const root = resolve(import.meta.dirname, '..')
 const hostMocks = vi.hoisted(() => ({
@@ -122,11 +124,12 @@ describe('OpenChamber extension package', () => {
     }
   })
 
-  it('renders a prompt select, the empty hint, and disables deletion for the default prompt', async () => {
+  it('renders the seeded prompt select and disables deletion for the default prompt', async () => {
     await loadPanel()
-    await vi.waitFor(() => expect(document.querySelector('#prompt-select option[value="default"]')).not.toBeNull())
+    await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select option')).toHaveLength(12))
 
     expect(document.querySelector('#prompt-empty')!.textContent).toContain('暂无增强提示词，请点击新增')
+    expect(document.querySelector<HTMLParagraphElement>('#prompt-empty')!.hidden).toBe(true)
     expect(document.querySelector('#prompt-tabs')).toBeNull()
     expect(document.querySelector<HTMLSelectElement>('#prompt-select')!.value).toBe('default')
     expect(document.querySelector('#prompt-active-hint')!.textContent).toBe('当前生成将使用系统提示词模板：默认提示词')
@@ -154,7 +157,7 @@ describe('OpenChamber extension package', () => {
     await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select')).toHaveLength(1))
 
     const select = document.querySelector<HTMLSelectElement>('#prompt-select')!
-    expect(select.options).toHaveLength(41)
+    expect(select.options).toHaveLength(52)
     const html = await readFile(resolve(root, 'panel/index.html'), 'utf8')
     expect(html).toMatch(/#prompt-select\s*\{[^}]*width:\s*min\(/)
     expect(html).toMatch(/#prompt-select\s*\{[^}]*max-width:/)
@@ -216,6 +219,7 @@ describe('OpenChamber extension package', () => {
   it('adds prompts only after title and content validation, then selects and persists the new prompt', async () => {
     await loadPanel()
     await vi.waitFor(() => expect(document.querySelector('#prompt-select option[value="default"]')).not.toBeNull())
+    hostMocks.storageSet.mockClear()
     click('add-prompt')
     const dialog = document.querySelector<HTMLDialogElement>('#prompt-dialog')!
     expect(dialog.open).toBe(true)
@@ -245,7 +249,10 @@ describe('OpenChamber extension package', () => {
       selectedPromptId: string, enhancedPrompts: { id: string, title: string, content: string }[]
     }
     expect(saved.selectedPromptId).not.toBe('default')
-    expect(saved.enhancedPrompts[0]!.id).toBe(saved.selectedPromptId)
+    expect(saved.enhancedPrompts.find(({ id }) => id === saved.selectedPromptId)).toMatchObject({
+      title: '  新提示词  ',
+      content: '  保留首尾空白的正文  ',
+    })
     expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('  保留首尾空白的正文  ')
     expect(dialog.open).toBe(false)
   })
@@ -297,7 +304,7 @@ describe('OpenChamber extension package', () => {
     click('delete-prompt')
     await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.objectContaining({
       selectedPromptId: 'default',
-      enhancedPrompts: [],
+      enhancedPrompts: expect.not.arrayContaining([expect.objectContaining({ id: 'review' })]),
     })))
     await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toContain('expert prompt engineer'))
     expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toContain('expert prompt engineer')
@@ -331,7 +338,7 @@ describe('OpenChamber extension package', () => {
     expect(saved).toMatchObject({
       systemPrompt: 'legacy system prompt',
       maxOutputTokens: 1536,
-      enhancedPrompts: [],
+      enhancedPrompts: expect.arrayContaining([expect.objectContaining({ id: 'builtin-81a7563e-fd6a-4988-9a69-5cc7ae6e2971' })]),
       selectedPromptId: 'default',
     })
   })
@@ -367,7 +374,10 @@ describe('OpenChamber extension package', () => {
     const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as {
       enhancedPrompts: { id: string, title: string, content: string }[], selectedPromptId: string
     }
-    expect(saved.enhancedPrompts).toEqual([{ id: 'review', title: '审查', content: 'selected enhanced prompt' }])
+    expect(saved.enhancedPrompts).toHaveLength(12)
+    expect(saved.enhancedPrompts).toEqual(expect.arrayContaining([
+      { id: 'review', title: '审查', content: 'selected enhanced prompt' },
+    ]))
     expect(saved.selectedPromptId).toBe('review')
   })
 
@@ -402,6 +412,7 @@ describe('OpenChamber extension package', () => {
     hostMocks.generate.mockResolvedValue({ text: 'generated' })
     await loadPanel()
     await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('saved system prompt'))
+    hostMocks.storageSet.mockClear()
     document.querySelector<HTMLTextAreaElement>('#system')!.value = 'x'.repeat(8001)
 
     click('save')
@@ -433,6 +444,141 @@ describe('OpenChamber extension package', () => {
     click('save')
     await vi.waitFor(() => expect(document.querySelector('#status')!.textContent).toMatch(/存储|大小|限制/))
     expect(hostMocks.storageSet).not.toHaveBeenCalledWith('settings', expect.anything())
+  })
+
+  it('seeds all built-in enhancement prompts without changing the default selection', async () => {
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select option')).toHaveLength(12))
+
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as {
+      systemPrompt: string
+      enhancedPrompts: { id: string, title: string, content: string }[]
+      selectedPromptId: string
+    }
+    expect(saved.systemPrompt).toBe(DEFAULT_SYSTEM_PROMPT)
+    expect(saved.selectedPromptId).toBe('default')
+    expect(saved.enhancedPrompts).toHaveLength(11)
+    expect(saved.enhancedPrompts.map(({ id, title }) => ({ id, title }))).toEqual([
+      { id: 'builtin-81a7563e-fd6a-4988-9a69-5cc7ae6e2971', title: '通用迭代' },
+      { id: 'builtin-44f64d19-fa3b-4d44-80d0-d1e783a4ce7b', title: '通用优化-带输出格式要求' },
+      { id: 'builtin-10c496ee-9f72-4aa9-8107-c1591cf6cb20', title: '分析式结构优化' },
+      { id: 'builtin-6256fbd6-52cd-4ae8-a307-7ac19ede3194', title: '专业优化' },
+      { id: 'builtin-60d5b23b-2fce-4c33-b50e-8a67a8f38ed8', title: '基础优化' },
+      { id: 'builtin-124d92f8-beaf-4f2c-ac57-eeb07a42457b', title: '步骤化规划' },
+      { id: 'builtin-c8a9321a-94b0-41fd-994d-4055a878a664', title: '通用消息优化（推荐）' },
+      { id: 'builtin-2e042beb-70e4-4617-8775-58db6c6ea4d6', title: '分析型优化（技术场景）' },
+      { id: 'builtin-7314a7fd-b261-4a83-b13f-e8b80eee8674', title: '步骤规划' },
+      { id: 'builtin-5d333a6e-6827-4047-b337-9c66665682b6', title: '专业改写' },
+      { id: 'builtin-abe4abca-340a-4188-9c3c-f6e4eca332dc', title: '小步迭代' },
+    ])
+    expect(saved.enhancedPrompts.map(({ content }) => content.length)).toEqual([
+      385, 527, 430, 313, 979, 677, 695, 650, 890, 910, 622,
+    ])
+    expect(saved.enhancedPrompts[0]!.content).toContain('Role')
+    expect(saved.enhancedPrompts[1]!.content).toContain('OutputFormat')
+    expect(saved.enhancedPrompts[7]!.content).toContain('二元条件')
+    expect(saved.enhancedPrompts[10]!.content).toContain('conversationContext')
+  })
+
+  it('does not write built-ins again when settings are loaded a second time', async () => {
+    let storedSettings: unknown
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings' ? storedSettings : undefined))
+    hostMocks.storageSet.mockImplementation((key: string, value: unknown) => {
+      if (key === 'settings') storedSettings = value
+      return Promise.resolve()
+    })
+
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select option')).toHaveLength(12))
+    const writesAfterFirstLoad = hostMocks.storageSet.mock.calls.filter(([key]) => key === 'settings').length
+
+    document.body.replaceChildren()
+    vi.resetModules()
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select option')).toHaveLength(12))
+
+    expect(hostMocks.storageSet.mock.calls.filter(([key]) => key === 'settings')).toHaveLength(writesAfterFirstLoad)
+    expect((storedSettings as { enhancedPrompts: unknown[] }).enhancedPrompts).toHaveLength(11)
+  })
+
+  it('preserves user settings and skips built-ins that collide by id or title', async () => {
+    const userPrompts = [
+      { id: 'user-review', title: '用户模板', content: 'user content' },
+      { id: 'builtin-81a7563e-fd6a-4988-9a69-5cc7ae6e2971', title: '用户覆盖标题', content: 'user id collision' },
+      { id: 'user-title-collision', title: '专业优化', content: 'user title collision' },
+    ]
+    hostMocks.storageGet.mockResolvedValue({
+      systemPrompt: 'user default system prompt',
+      maxOutputTokens: 1536,
+      enhancedPrompts: userPrompts,
+      selectedPromptId: 'user-review',
+    })
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector('#prompt-select option[value="user-review"]')).not.toBeNull())
+
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as {
+      systemPrompt: string
+      maxOutputTokens: number
+      enhancedPrompts: { id: string, title: string, content: string }[]
+      selectedPromptId: string
+    }
+    expect(saved).toMatchObject({
+      systemPrompt: 'user default system prompt',
+      maxOutputTokens: 1536,
+      selectedPromptId: 'user-review',
+    })
+    expect(saved.enhancedPrompts).toHaveLength(12)
+    expect(saved.enhancedPrompts).toEqual(expect.arrayContaining(userPrompts))
+    expect(saved.enhancedPrompts.find(({ id }) => id === 'builtin-81a7563e-fd6a-4988-9a69-5cc7ae6e2971')!.content).toBe('user id collision')
+    expect(saved.enhancedPrompts.find(({ title }) => title === '专业优化')!.content).toBe('user title collision')
+  })
+
+  it('keeps seeded settings under the existing 60 KiB storage limit', async () => {
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select option')).toHaveLength(12))
+
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1]
+    expect(new TextEncoder().encode(JSON.stringify(saved)).byteLength).toBeLessThanOrEqual(60 * 1024)
+  })
+
+  it('keeps every built-in profile name and full content from the bundled library', async () => {
+    const source = JSON.parse(await readFile(resolve(root, 'panel/builtin-prompts.json'), 'utf8')) as {
+      profiles: { id: string, name: string, content: string }[]
+    }
+    const module = await import('../panel/builtin-prompts')
+    const prompts = module.BUILTIN_ENHANCED_PROMPTS
+    const hashes = [
+      'd6b0974532479ab89e18e5384d94360074be2553a6c04ef8d88eb387ed575072',
+      '6c61a7e7bcd5614dee0bf7ce040c4fcb0a3a932ce7e5aa713b9c57d220f3eb53',
+      '664aa815ecde3a4bd2032f5bfd8545bf3bb8c7c0e74147e0591245eef0242261',
+      '1d4e6d9aabe42661bc2b909591da6e975f8a6b7253fad906f73be0bb869438be',
+      '914bf4ec94255207b06f625f25f2eea0e6b3d28267565c44fa1dc524dd3ff424',
+      '6e06a20c324314554cfaa121bfabd8434602230c293589ce50ab4b1b0b4898dc',
+      '1cf228a946e5db4f25d2aa8a83485566833b81e2ddcc62c63914761abd5144c1',
+      'e756d365435e73032edb58a54d3ed30770d783ceb440ea6a323509a9d532fbb9',
+      'cccf6b3d04b410bcb2010078542ebbdb7615fa2098bf8ebd9ac582a16c7b2df9',
+      'fb2aee9286c4194a205c68841557c1186883bd9574d2a7cdc356f3cdd25cd280',
+      '46b5cd216f07eb3fb7b580ae6b3eb84e2ff834c1ebed931afc7ab7933dc3e3f1',
+    ]
+
+    expect(prompts).toHaveLength(11)
+    expect(prompts.map(({ id, title, content }, index) => ({
+      id,
+      title,
+      content,
+      contentHash: createHash('sha256').update(content).digest('hex'),
+      source: source.profiles[index],
+    }))).toEqual(source.profiles.map((profile, index) => ({
+      id: `builtin-${profile.id}`,
+      title: profile.name,
+      content: profile.content,
+      contentHash: hashes[index],
+      source: profile,
+    })))
+    expect(prompts.map(({ title }) => title)).toEqual([
+      '通用迭代', '通用优化-带输出格式要求', '分析式结构优化', '专业优化', '基础优化', '步骤化规划',
+      '通用消息优化（推荐）', '分析型优化（技术场景）', '步骤规划', '专业改写', '小步迭代',
+    ])
   })
 
   it('keeps the settings draft visible after storage rejects a save', async () => {

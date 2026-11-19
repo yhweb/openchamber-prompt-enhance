@@ -1,12 +1,14 @@
 import { connectHost } from '@openchamber/sdk'
 import { applyHostReady } from '@openchamber/sdk/ui'
 import { DEFAULT_SYSTEM_PROMPT, frameUserPrompt } from '../src/prompts'
+import { BUILTIN_ENHANCED_PROMPTS } from './builtin-prompts'
 
 interface EnhancerSettings {
   systemPrompt: string
   maxOutputTokens: number
   enhancedPrompts: EnhancedPrompt[]
   selectedPromptId: string
+  builtinPromptsSeeded: boolean
 }
 
 type EnhancedPrompt = {
@@ -28,6 +30,7 @@ const DEFAULT_SETTINGS: EnhancerSettings = {
   maxOutputTokens: 2048,
   enhancedPrompts: [],
   selectedPromptId: 'default',
+  builtinPromptsSeeded: false,
 }
 const SETTINGS_KEY = 'settings'
 const DEFAULT_PROMPT_ID = 'default'
@@ -298,7 +301,26 @@ function sanitizeSettings(value: unknown): EnhancerSettings {
       : DEFAULT_SETTINGS.maxOutputTokens,
     enhancedPrompts,
     selectedPromptId,
+    builtinPromptsSeeded: candidate.builtinPromptsSeeded === true,
   }
+}
+
+async function seedBuiltInPrompts(): Promise<void> {
+  if (settings.builtinPromptsSeeded) return
+
+  const seenIds = new Set(settings.enhancedPrompts.map((prompt) => prompt.id))
+  const seenTitles = new Set(settings.enhancedPrompts.map((prompt) => prompt.title))
+  const enhancedPrompts = [...settings.enhancedPrompts]
+  for (const prompt of BUILTIN_ENHANCED_PROMPTS) {
+    if (seenIds.has(prompt.id) || seenTitles.has(prompt.title)) continue
+    const next = [...enhancedPrompts, prompt]
+    if (byteLength(JSON.stringify({ ...settings, enhancedPrompts: next, builtinPromptsSeeded: true })) > SETTINGS_BYTES_LIMIT) continue
+    enhancedPrompts.push(prompt)
+    seenIds.add(prompt.id)
+    seenTitles.add(prompt.title)
+  }
+
+  await persistSettings({ ...settings, enhancedPrompts, builtinPromptsSeeded: true })
 }
 
 function selectedSystemPrompt(value: EnhancerSettings): string {
@@ -438,6 +460,7 @@ function showSettings(): void {
 async function loadSettings(): Promise<void> {
   try {
     settings = sanitizeSettings(await host.storage.get(SETTINGS_KEY))
+    await seedBuiltInPrompts()
   } catch {
     settings = { ...DEFAULT_SETTINGS, enhancedPrompts: [] }
     setStatus('无法读取已保存的设置，当前使用默认设置。', 'error')

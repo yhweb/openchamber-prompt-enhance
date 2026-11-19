@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend the existing enhancement settings with editable/restorable default prompts and persistent, selectable, addable, editable, and deletable system enhancement prompts without changing the generation contract.
+**Goal:** Extend the existing enhancement settings with editable/restorable default prompts, persistent user prompts, and 11 idempotently preloaded OpenChamber prompt templates without changing the generation contract.
 
-**Architecture:** Keep `systemPrompt` as the backward-compatible editable default prompt inside the existing `settings` storage object. Add sanitized `enhancedPrompts` records and `selectedPromptId`; resolve the effective prompt in the panel before calling the unchanged `host.generate({ system })` API. Render a fixed-width prompt `<select>` with a visible active-template hint and use an in-page `<dialog>` for adding a title and content.
+**Architecture:** Keep `systemPrompt` as the backward-compatible editable default prompt inside the existing `settings` storage object. Add sanitized `enhancedPrompts` records and `selectedPromptId`; seed missing built-in records with stable ids from a versioned panel catalog, then resolve the effective prompt before calling the unchanged `host.generate({ system })` API. Render a fixed-width prompt `<select>` with a visible active-template hint and use an in-page `<dialog>` for adding a title and content.
 
 **Tech Stack:** TypeScript panel logic, HTML/CSS panel UI, OpenChamber SDK `host.storage`, Vitest/jsdom tests, esbuild browser IIFE build.
 
@@ -19,6 +19,7 @@
 - Active system prompt text must respect the SDK's 8,000-character limit.
 - Keep the combined settings payload below the host's storage limit; reject an oversized write without losing the in-memory draft.
 - The committed `panel/main.js` must be regenerated after changing `panel/main.ts`.
+- Built-in templates are enhancement prompts only; they must never replace `DEFAULT_SYSTEM_PROMPT` or auto-select themselves.
 
 ## Review Focus
 
@@ -35,6 +36,7 @@
 **Files:**
 - Modify: `panel/main.ts` settings types, sanitization, loading, persistence, and prompt-resolution helpers.
 - Test: `tests/openchamber-panel.test.ts`.
+- Create: `panel/builtin-prompts.ts` stable catalog copied from the 11 profiles in the OpenChamber `prompt-override` library.
 
 **Interfaces:**
 - Consumes: existing `DEFAULT_SYSTEM_PROMPT`, `host.storage`, and `EnhancerSettings`.
@@ -52,7 +54,7 @@
 
 - [ ] **Step 3: Implement the sanitized settings model in `panel/main.ts`**
 
-  Add `EnhancedPrompt { id, title, content }`, `enhancedPrompts`, and `selectedPromptId` while retaining the old two fields. Normalize invalid entries, drop duplicate ids, enforce non-empty trimmed titles/content, resolve unknown selection ids to `default`, and use `DEFAULT_SYSTEM_PROMPT` for a missing/blank default prompt. Add constants for `default`, the 8,000-character active prompt limit, and the storage payload safety limit.
+  Add `EnhancedPrompt { id, title, content }`, `enhancedPrompts`, and `selectedPromptId` while retaining the old two fields. Normalize invalid entries, drop duplicate ids, enforce non-empty trimmed titles/content, resolve unknown selection ids to `default`, and use `DEFAULT_SYSTEM_PROMPT` for a missing/blank default prompt. Add constants for `default`, the 8,000-character active prompt limit, and the storage payload safety limit. Add a one-time idempotent seed that appends missing `builtin-<profile id>` records from `panel/builtin-prompts.ts`, skips records with a user-owned same id or title, and leaves the default prompt and current selection unchanged.
 
 - [ ] **Step 4: Implement effective prompt resolution and safe settings persistence**
 

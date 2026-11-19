@@ -9,6 +9,7 @@
 - 在默认提示词和增强提示词之间选择，生成时使用当前选中的内容；
 - 删除增强提示词；
 - 重新打开面板时保留上一次选择的提示词。
+- 首次使用时自动同步 OpenChamber 内置提示词扩展中的 11 个增强模板，免去逐条手工新增。
 
 ## 当前接入点
 
@@ -61,6 +62,8 @@ interface EnhancerSettings {
 `selectedPromptId` 同时承担当前选择和下次打开面板时的默认选择：选择某条增强提示词后立即持久化其 id，下一次加载时若该 id 仍存在就自动选中；选择默认提示词则保存为 `default`。因此不需要复制一份“最后选择”的内容，删除后也不会留下悬空引用。
 
 有效系统提示词由一个纯函数解析：`selectedPromptId === 'default'` 时返回 `systemPrompt`；否则查找对应增强提示词并返回其 `content`；找不到时回退到默认提示词并把选中项修正为 `default`。旧存储对象缺失 `enhancedPrompts` 或 `selectedPromptId` 时按这一规则兼容。
+
+内置模板从 `panel/builtin-prompts.ts` 的版本化常量导入，使用 `builtin-<内置 profile id>` 作为稳定 id。加载设置时幂等追加缺失的内置模板：不修改 `systemPrompt`、不改变 `selectedPromptId`，也不覆盖用户已有的同 id 或同标题模板；用户模板优先，冲突的内置模板跳过。这样重复打开面板或保存设置都不会产生重复项。
 
 ## 交互
 
