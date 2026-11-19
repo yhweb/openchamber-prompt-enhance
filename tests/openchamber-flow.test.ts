@@ -36,7 +36,19 @@ function renderPanel(): void {
     <div id="result"></div>
     <textarea id="system"></textarea>
     <input id="tokens" />
+    <select id="prompt-select"></select>
+    <p id="prompt-empty"></p>
+    <p id="prompt-active-hint"></p>
+    <button id="add-prompt"></button>
+    <button id="delete-prompt"></button>
+    <button id="reset-system"></button>
     <button id="save"></button>
+    <dialog id="prompt-dialog">
+      <input id="prompt-title" />
+      <textarea id="prompt-content"></textarea>
+      <button id="prompt-cancel"></button>
+      <button id="prompt-save"></button>
+    </dialog>
     <section id="history">
       <p id="history-empty"></p>
       <div id="history-list"></div>

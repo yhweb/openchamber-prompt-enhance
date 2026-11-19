@@ -5,6 +5,14 @@ import { DEFAULT_SYSTEM_PROMPT, frameUserPrompt } from '../src/prompts'
 interface EnhancerSettings {
   systemPrompt: string
   maxOutputTokens: number
+  enhancedPrompts: EnhancedPrompt[]
+  selectedPromptId: string
+}
+
+type EnhancedPrompt = {
+  id: string
+  title: string
+  content: string
 }
 
 /** One recorded enhancement, shared by every project. */
@@ -18,8 +26,13 @@ type HistoryEntry = {
 const DEFAULT_SETTINGS: EnhancerSettings = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   maxOutputTokens: 2048,
+  enhancedPrompts: [],
+  selectedPromptId: 'default',
 }
 const SETTINGS_KEY = 'settings'
+const DEFAULT_PROMPT_ID = 'default'
+const SYSTEM_PROMPT_LIMIT = 8000
+const SETTINGS_BYTES_LIMIT = 60 * 1024
 // Deliberately no project ID in the key: extension storage is server-owned, so
 // one key is one list for every project the panel is opened from.
 const HISTORY_KEY = 'history'
@@ -41,9 +54,21 @@ const clearAllButton = document.querySelector<HTMLButtonElement>('#clear-all')!
 const systemInput = document.querySelector<HTMLTextAreaElement>('#system')!
 const tokensInput = document.querySelector<HTMLInputElement>('#tokens')!
 const saveButton = document.querySelector<HTMLButtonElement>('#save')!
+const promptSelect = document.querySelector<HTMLSelectElement>('#prompt-select')!
+const promptEmpty = document.querySelector<HTMLParagraphElement>('#prompt-empty')!
+const promptActiveHint = document.querySelector<HTMLParagraphElement>('#prompt-active-hint')!
+const addPromptButton = document.querySelector<HTMLButtonElement>('#add-prompt')!
+const deletePromptButton = document.querySelector<HTMLButtonElement>('#delete-prompt')!
+const resetSystemButton = document.querySelector<HTMLButtonElement>('#reset-system')!
+const promptDialog = document.querySelector<HTMLDialogElement>('#prompt-dialog')!
+const promptTitleInput = document.querySelector<HTMLInputElement>('#prompt-title')!
+const promptContentInput = document.querySelector<HTMLTextAreaElement>('#prompt-content')!
+const promptCancelButton = document.querySelector<HTMLButtonElement>('#prompt-cancel')!
+const promptSaveButton = document.querySelector<HTMLButtonElement>('#prompt-save')!
 const historyList = document.querySelector<HTMLDivElement>('#history-list')!
 const historyEmpty = document.querySelector<HTMLParagraphElement>('#history-empty')!
 let settings = DEFAULT_SETTINGS
+const promptDrafts = new Map<string, string>()
 let historyEntries: HistoryEntry[] = []
 let requestId = 0
 let requestInFlight = false
@@ -239,30 +264,185 @@ async function loadHistory(): Promise<void> {
 }
 
 function sanitizeSettings(value: unknown): EnhancerSettings {
-  if (typeof value !== 'object' || value === null) return DEFAULT_SETTINGS
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_SETTINGS, enhancedPrompts: [] }
   const candidate = value as Partial<EnhancerSettings>
+  const systemPrompt = typeof candidate.systemPrompt === 'string'
+    && candidate.systemPrompt.trim() !== ''
+    && candidate.systemPrompt.length <= SYSTEM_PROMPT_LIMIT
+    ? candidate.systemPrompt
+    : DEFAULT_SETTINGS.systemPrompt
+  const enhancedPrompts: EnhancedPrompt[] = []
+  const seenIds = new Set<string>()
+  if (Array.isArray(candidate.enhancedPrompts)) {
+    for (const item of candidate.enhancedPrompts) {
+      if (typeof item !== 'object' || item === null) continue
+      const prompt = item as Partial<EnhancedPrompt>
+      if (typeof prompt.id !== 'string' || prompt.id.trim() === '') continue
+      if (typeof prompt.title !== 'string' || prompt.title.trim() === '') continue
+      if (typeof prompt.content !== 'string' || prompt.content.trim() === '') continue
+      if (prompt.content.length > SYSTEM_PROMPT_LIMIT) continue
+      const id = prompt.id.trim()
+      if (id === DEFAULT_PROMPT_ID || seenIds.has(id)) continue
+      seenIds.add(id)
+      enhancedPrompts.push({ id, title: prompt.title, content: prompt.content })
+    }
+  }
+  const selectedPromptId = typeof candidate.selectedPromptId === 'string'
+    && (candidate.selectedPromptId === DEFAULT_PROMPT_ID || seenIds.has(candidate.selectedPromptId.trim()))
+    ? candidate.selectedPromptId.trim()
+    : DEFAULT_PROMPT_ID
   return {
-    systemPrompt: typeof candidate.systemPrompt === 'string' && candidate.systemPrompt.trim()
-      ? candidate.systemPrompt
-      : DEFAULT_SETTINGS.systemPrompt,
-    maxOutputTokens: typeof candidate.maxOutputTokens === 'number'
+    systemPrompt,
+    maxOutputTokens: typeof candidate.maxOutputTokens === 'number' && Number.isFinite(candidate.maxOutputTokens)
       ? Math.max(128, Math.min(4000, Math.round(candidate.maxOutputTokens / 128) * 128))
       : DEFAULT_SETTINGS.maxOutputTokens,
+    enhancedPrompts,
+    selectedPromptId,
+  }
+}
+
+function selectedSystemPrompt(value: EnhancerSettings): string {
+  if (value.selectedPromptId === DEFAULT_PROMPT_ID) {
+    return promptDrafts.get(DEFAULT_PROMPT_ID) ?? value.systemPrompt
+  }
+  const prompt = value.enhancedPrompts.find((candidate) => candidate.id === value.selectedPromptId)
+  return promptDrafts.get(value.selectedPromptId) ?? prompt?.content ?? DEFAULT_SYSTEM_PROMPT
+}
+
+function currentPromptContent(): string {
+  return promptDrafts.get(settings.selectedPromptId) ?? selectedSystemPrompt(settings)
+}
+
+function promptTitle(id: string): string {
+  if (id === DEFAULT_PROMPT_ID) return '默认提示词'
+  return settings.enhancedPrompts.find((prompt) => prompt.id === id)?.title ?? '默认提示词'
+}
+
+function renderPromptSelect(): void {
+  const defaultOption = document.createElement('option')
+  defaultOption.value = DEFAULT_PROMPT_ID
+  defaultOption.textContent = '默认提示词'
+  const enhancedOptions = settings.enhancedPrompts.map((prompt) => {
+    const option = document.createElement('option')
+    option.value = prompt.id
+    option.textContent = prompt.title
+    return option
+  })
+  promptSelect.replaceChildren(defaultOption, ...enhancedOptions)
+  promptSelect.value = settings.selectedPromptId
+  promptEmpty.hidden = settings.enhancedPrompts.length > 0
+  promptActiveHint.textContent = `当前生成将使用系统提示词模板：${promptTitle(settings.selectedPromptId)}`
+  deletePromptButton.disabled = settings.selectedPromptId === DEFAULT_PROMPT_ID
+  resetSystemButton.disabled = settings.selectedPromptId !== DEFAULT_PROMPT_ID
+  systemInput.value = currentPromptContent()
+}
+
+async function selectPrompt(id: string): Promise<void> {
+  if (id === settings.selectedPromptId) return
+  const nextSettings = { ...settings, selectedPromptId: id }
+  if (!await persistSettings(nextSettings)) {
+    promptSelect.value = settings.selectedPromptId
+    return
+  }
+  renderPromptSelect()
+  setStatus('已切换系统提示词。')
+}
+
+function newPromptId(): string {
+  let id = ''
+  do {
+    id = `prompt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  } while (settings.enhancedPrompts.some((prompt) => prompt.id === id))
+  return id
+}
+
+function closePromptDialog(): void {
+  if (typeof promptDialog.close === 'function') promptDialog.close()
+  else promptDialog.open = false
+}
+
+function openPromptDialog(): void {
+  promptTitleInput.value = ''
+  promptContentInput.value = ''
+  try {
+    promptDialog.showModal()
+  } catch {
+    promptDialog.open = true
+  }
+}
+
+async function addPrompt(): Promise<void> {
+  const title = promptTitleInput.value
+  const content = promptContentInput.value
+  if (title.trim() === '') {
+    setStatus('提示词标题不能为空。', 'error')
+    return
+  }
+  if (content.trim() === '') {
+    setStatus('提示词内容不能为空。', 'error')
+    return
+  }
+  if (content.length > SYSTEM_PROMPT_LIMIT) {
+    setStatus(`系统提示词不能超过 ${SYSTEM_PROMPT_LIMIT} 个字符。`, 'error')
+    return
+  }
+
+  const prompt: EnhancedPrompt = { id: newPromptId(), title, content }
+  const nextSettings: EnhancerSettings = {
+    ...settings,
+    enhancedPrompts: [...settings.enhancedPrompts, prompt],
+    selectedPromptId: prompt.id,
+  }
+  if (!await persistSettings(nextSettings)) return
+  promptDrafts.delete(prompt.id)
+  closePromptDialog()
+  renderPromptSelect()
+  setStatus('增强提示词已添加。')
+}
+
+async function deletePrompt(): Promise<void> {
+  const id = settings.selectedPromptId
+  if (id === DEFAULT_PROMPT_ID) return
+  const nextSettings: EnhancerSettings = {
+    ...settings,
+    enhancedPrompts: settings.enhancedPrompts.filter((prompt) => prompt.id !== id),
+    selectedPromptId: DEFAULT_PROMPT_ID,
+  }
+  if (!await persistSettings(nextSettings)) return
+  promptDrafts.delete(id)
+  renderPromptSelect()
+  setStatus('增强提示词已删除。')
+}
+
+async function persistSettings(next: EnhancerSettings): Promise<boolean> {
+  if (byteLength(JSON.stringify(next)) > SETTINGS_BYTES_LIMIT) {
+    setStatus(`设置过大，未保存（限制 ${SETTINGS_BYTES_LIMIT} 字节）。`, 'error')
+    return false
+  }
+  try {
+    await host.storage.set(SETTINGS_KEY, { ...next })
+    settings = next
+    return true
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误'
+    setStatus(`保存设置失败（${message}）。`, 'error')
+    return false
   }
 }
 
 function showSettings(): void {
-  systemInput.value = settings.systemPrompt
   tokensInput.value = String(settings.maxOutputTokens)
+  renderPromptSelect()
 }
 
 async function loadSettings(): Promise<void> {
   try {
     settings = sanitizeSettings(await host.storage.get(SETTINGS_KEY))
   } catch {
-    settings = DEFAULT_SETTINGS
+    settings = { ...DEFAULT_SETTINGS, enhancedPrompts: [] }
     setStatus('无法读取已保存的设置，当前使用默认设置。', 'error')
   }
+  promptDrafts.clear()
   showSettings()
 }
 
@@ -283,7 +463,7 @@ async function enhance(): Promise<void> {
   try {
     const response = await host.generate({
       prompt: frameUserPrompt(text),
-      system: settings.systemPrompt,
+      system: selectedSystemPrompt(settings),
       maxOutputTokens: settings.maxOutputTokens,
     })
     if (currentRequest !== requestId) return
@@ -324,15 +504,46 @@ saveButton.addEventListener('click', async () => {
     setStatus('输出令牌数必须在 128 到 4000 之间。', 'error')
     return
   }
-  settings = sanitizeSettings({ systemPrompt: systemInput.value, maxOutputTokens })
-  try {
-    await host.storage.set(SETTINGS_KEY, { ...settings })
+  const content = systemInput.value
+  if (content.trim() === '') {
+    setStatus('系统提示词不能为空。', 'error')
+    return
+  }
+  if (content.length > SYSTEM_PROMPT_LIMIT) {
+    setStatus(`系统提示词不能超过 ${SYSTEM_PROMPT_LIMIT} 个字符。`, 'error')
+    return
+  }
+  const nextSettings = settings.selectedPromptId === DEFAULT_PROMPT_ID
+    ? { ...settings, systemPrompt: content, maxOutputTokens }
+    : {
+        ...settings,
+        maxOutputTokens,
+        enhancedPrompts: settings.enhancedPrompts.map((prompt) => (
+          prompt.id === settings.selectedPromptId ? { ...prompt, content } : prompt
+        )),
+      }
+  const sanitizedSettings = sanitizeSettings(nextSettings)
+  if (await persistSettings(sanitizedSettings)) {
+    promptDrafts.delete(settings.selectedPromptId)
     showSettings()
     setStatus('设置已保存。')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '未知错误'
-    setStatus(`保存设置失败（${message}）。`, 'error')
   }
+})
+systemInput.addEventListener('input', () => {
+  promptDrafts.set(settings.selectedPromptId, systemInput.value)
+})
+addPromptButton.addEventListener('click', openPromptDialog)
+promptCancelButton.addEventListener('click', closePromptDialog)
+promptSaveButton.addEventListener('click', () => { void addPrompt() })
+deletePromptButton.addEventListener('click', () => { void deletePrompt() })
+promptSelect.addEventListener('change', () => { void selectPrompt(promptSelect.value) })
+resetSystemButton.addEventListener('click', async () => {
+  if (settings.selectedPromptId !== DEFAULT_PROMPT_ID) return
+  const nextSettings = { ...settings, systemPrompt: DEFAULT_SYSTEM_PROMPT }
+  if (!await persistSettings(nextSettings)) return
+  promptDrafts.delete(DEFAULT_PROMPT_ID)
+  showSettings()
+  setStatus('已恢复默认系统提示词。')
 })
 draft.addEventListener('input', () => {
   if (result.textContent) setStatus('提示词已更改；当前显示的结果对应先前的提示词。')

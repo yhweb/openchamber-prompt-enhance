@@ -19,6 +19,18 @@
       #status[data-kind="error"] { color: var(--destructive, #c33); }
       details { border-top: 1px solid var(--border, #8888); padding-top: 10px; }
       input[type="number"] { width: 8rem; padding: 6px; }
+      #prompt-selector { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      #prompt-select { box-sizing: border-box; width: min(28rem, 100%); max-width: 28rem; min-width: 0; flex: 0 1 28rem; padding: 8px; color: var(--surface-foreground, var(--oc-fg, var(--foreground, inherit))); background: var(--surface-background, var(--oc-bg, var(--background, transparent))); border: 1px solid var(--interactive-border, var(--oc-border, var(--border, #8888))); border-radius: 7px; color-scheme: inherit; font: inherit; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+      #prompt-select option { color: var(--surface-foreground, var(--oc-fg, var(--foreground, inherit))); background: var(--surface-background, var(--oc-bg, var(--background, transparent))); }
+      #prompt-actions, #settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      #prompt-empty { margin: 0; color: var(--muted-foreground, inherit); }
+      #prompt-active-hint { margin: 0; overflow-wrap: anywhere; word-break: break-word; }
+      #prompt-dialog { box-sizing: border-box; width: min(34rem, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 16px; color: inherit; background: var(--background, Canvas); border: 1px solid var(--border, #8888); border-radius: 8px; }
+      #prompt-dialog::backdrop { background: #0008; }
+      #prompt-dialog form { display: grid; gap: 12px; }
+      #prompt-dialog h2 { margin: 0; font-size: 1.05rem; }
+      #prompt-dialog textarea { min-height: 180px; }
+      #prompt-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
       #history { display: grid; gap: 8px; border-top: 1px solid var(--border, #8888); padding-top: 10px; }
       #history h2 { margin: 0; font-size: 1rem; }
       #history-empty { margin: 0; opacity: .7; }
@@ -62,11 +74,36 @@
       <details>
         <summary>增强设置</summary>
         <label for="system">系统提示词</label>
+        <div id="prompt-selector">
+          <select id="prompt-select" aria-label="系统提示词模板"></select>
+          <div id="prompt-actions">
+            <button id="add-prompt" type="button">新增</button>
+            <button id="delete-prompt" type="button" disabled>删除</button>
+          </div>
+        </div>
+        <p id="prompt-empty">暂无增强提示词，请点击新增</p>
+        <p id="prompt-active-hint" role="status" aria-live="polite"></p>
         <textarea id="system"></textarea>
         <label for="tokens">最大输出令牌数</label>
         <input id="tokens" type="number" min="128" max="4000" step="128" />
-        <button id="save" type="button">保存设置</button>
+        <div id="settings-actions">
+          <button id="reset-system" type="button">恢复默认值</button>
+          <button id="save" type="button">保存设置</button>
+        </div>
       </details>
+      <dialog id="prompt-dialog" aria-labelledby="prompt-dialog-title">
+        <form method="dialog">
+          <h2 id="prompt-dialog-title">新增系统提示词</h2>
+          <label for="prompt-title">标题</label>
+          <input id="prompt-title" type="text" />
+          <label for="prompt-content">内容</label>
+          <textarea id="prompt-content"></textarea>
+          <div id="prompt-dialog-actions">
+            <button id="prompt-cancel" type="button">取消</button>
+            <button id="prompt-save" type="button">添加</button>
+          </div>
+        </form>
+      </dialog>
       <section id="history" aria-labelledby="history-title">
         <h2 id="history-title">历史增强词</h2>
         <p id="history-empty">暂无历史记录；点击“增强提示词”后会记录在这里。</p>

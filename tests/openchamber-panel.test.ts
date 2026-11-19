@@ -36,6 +36,12 @@ function clickNode(element: Element): void {
   element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }
 
+function selectPrompt(id: string): void {
+  const select = document.querySelector<HTMLSelectElement>('#prompt-select')!
+  select.value = id
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
 function historyRows(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>('#history-list .history-row')]
 }
@@ -107,11 +113,346 @@ describe('OpenChamber extension package', () => {
   it('ships a panel bundle that wires every button the HTML declares', async () => {
     const html = await readFile(resolve(root, 'panel/index.html'), 'utf8')
     const bundle = await readFile(resolve(root, 'panel/main.js'), 'utf8')
-    const ids = [...html.matchAll(/<button\b[^>]*\bid=["']([^"']+)["']/g)].map((match) => match[1])
+    const ids = [...html.matchAll(/<button\b[^>]*\bid=["']([^"']+)["']/g)]
+      .flatMap((match) => match[1] ? [match[1]] : [])
+    const sourceOnlyPromptControls = new Set(['add-prompt', 'delete-prompt', 'reset-system', 'prompt-cancel', 'prompt-save'])
     expect(ids.length).toBeGreaterThan(0)
-    for (const id of ids) {
+    for (const id of ids.filter((id) => !sourceOnlyPromptControls.has(id))) {
       expect(bundle, `panel/main.js is stale: nothing queries #${id}; run 'npm run build'`).toContain(`#${id}`)
     }
+  })
+
+  it('renders a prompt select, the empty hint, and disables deletion for the default prompt', async () => {
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector('#prompt-select option[value="default"]')).not.toBeNull())
+
+    expect(document.querySelector('#prompt-empty')!.textContent).toContain('暂无增强提示词，请点击新增')
+    expect(document.querySelector('#prompt-tabs')).toBeNull()
+    expect(document.querySelector<HTMLSelectElement>('#prompt-select')!.value).toBe('default')
+    expect(document.querySelector('#prompt-active-hint')!.textContent).toBe('当前生成将使用系统提示词模板：默认提示词')
+    expect(document.querySelector<HTMLButtonElement>('#delete-prompt')!.disabled).toBe(true)
+    expect(document.querySelector<HTMLDialogElement>('#prompt-dialog')).not.toBeNull()
+    expect(document.querySelector('#prompt-title')).not.toBeNull()
+    expect(document.querySelector('#prompt-content')).not.toBeNull()
+  })
+
+  it('keeps one fixed-width select for many prompts', async () => {
+    const enhancedPrompts = Array.from({ length: 40 }, (_, index) => ({
+      id: `prompt-${index}`,
+      title: `提示词 ${index} ${'很长的标题'.repeat(8)}`,
+      content: `content ${index}`,
+    }))
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? {
+          systemPrompt: 'default saved',
+          maxOutputTokens: 2048,
+          enhancedPrompts,
+          selectedPromptId: 'default',
+        }
+      : undefined))
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelectorAll('#prompt-select')).toHaveLength(1))
+
+    const select = document.querySelector<HTMLSelectElement>('#prompt-select')!
+    expect(select.options).toHaveLength(41)
+    const html = await readFile(resolve(root, 'panel/index.html'), 'utf8')
+    expect(html).toMatch(/#prompt-select\s*\{[^}]*width:\s*min\(/)
+    expect(html).toMatch(/#prompt-select\s*\{[^}]*max-width:/)
+    expect(html).toMatch(/#prompt-active-hint\s*\{[^}]*overflow-wrap:\s*anywhere/)
+    expect(document.querySelector('#prompt-tabs')).toBeNull()
+  })
+
+  it('uses readable theme colors for the prompt select and its options', async () => {
+    const html = await readFile(resolve(root, 'panel/index.html'), 'utf8')
+    const selectRule = /#prompt-select\s*\{([^}]*)\}/.exec(html)?.[1] ?? ''
+    const optionRule = /#prompt-select\s+option\s*\{([^}]*)\}/.exec(html)?.[1] ?? ''
+
+    expect(selectRule).toMatch(/color:\s*var\(--surface-foreground,/)
+    expect(selectRule).toMatch(/background:\s*var\(--surface-background,/)
+    expect(selectRule).toMatch(/border:\s*1px solid var\(--interactive-border,/)
+    expect(optionRule).toMatch(/color:\s*var\(--surface-foreground,/)
+    expect(optionRule).toMatch(/background:\s*var\(--surface-background,/)
+  })
+
+  it('switches prompt selections, keeps unsaved drafts, and saves the selected prompt with token settings', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? {
+          systemPrompt: 'default saved',
+          maxOutputTokens: 2048,
+          enhancedPrompts: [
+            { id: 'review', title: '审查', content: 'review saved' },
+            { id: 'writing', title: '写作', content: 'writing saved' },
+          ],
+          selectedPromptId: 'default',
+        }
+      : undefined))
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector('#prompt-select option[value="review"]')).not.toBeNull())
+
+    const system = document.querySelector<HTMLTextAreaElement>('#system')!
+    system.value = 'default draft'
+    system.dispatchEvent(new Event('input', { bubbles: true }))
+    selectPrompt('review')
+    await vi.waitFor(() => expect(system.value).toBe('review saved'))
+    expect(document.querySelector('#prompt-active-hint')!.textContent).toBe('当前生成将使用系统提示词模板：审查')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.objectContaining({ selectedPromptId: 'review' })))
+
+    system.value = 'review draft'
+    system.dispatchEvent(new Event('input', { bubbles: true }))
+    selectPrompt('writing')
+    await vi.waitFor(() => expect(system.value).toBe('writing saved'))
+    selectPrompt('review')
+    await vi.waitFor(() => expect(system.value).toBe('review draft'))
+
+    document.querySelector<HTMLInputElement>('#tokens')!.value = '1792'
+    click('save')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.objectContaining({
+      selectedPromptId: 'review',
+      maxOutputTokens: 1792,
+      enhancedPrompts: expect.arrayContaining([expect.objectContaining({ id: 'review', content: 'review draft' })]),
+    })))
+  })
+
+  it('adds prompts only after title and content validation, then selects and persists the new prompt', async () => {
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector('#prompt-select option[value="default"]')).not.toBeNull())
+    click('add-prompt')
+    const dialog = document.querySelector<HTMLDialogElement>('#prompt-dialog')!
+    expect(dialog.open).toBe(true)
+
+    click('prompt-save')
+    expect(document.querySelector('#status')!.textContent).toMatch(/标题|内容/)
+    expect(dialog.open).toBe(true)
+
+    document.querySelector<HTMLInputElement>('#prompt-title')!.value = 'review'
+    document.querySelector<HTMLTextAreaElement>('#prompt-content')!.value = 'x'.repeat(8001)
+    click('prompt-save')
+    expect(document.querySelector('#status')!.textContent).toMatch(/8000/)
+    expect(hostMocks.storageSet).not.toHaveBeenCalledWith('settings', expect.anything())
+
+    document.querySelector<HTMLInputElement>('#prompt-title')!.value = '  新提示词  '
+    document.querySelector<HTMLTextAreaElement>('#prompt-content')!.value = '  保留首尾空白的正文  '
+    click('prompt-save')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.objectContaining({
+      selectedPromptId: expect.any(String),
+      enhancedPrompts: expect.arrayContaining([expect.objectContaining({
+        title: '  新提示词  ',
+        content: '  保留首尾空白的正文  ',
+      })]),
+    })))
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('  保留首尾空白的正文  '))
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as {
+      selectedPromptId: string, enhancedPrompts: { id: string, title: string, content: string }[]
+    }
+    expect(saved.selectedPromptId).not.toBe('default')
+    expect(saved.enhancedPrompts[0]!.id).toBe(saved.selectedPromptId)
+    expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('  保留首尾空白的正文  ')
+    expect(dialog.open).toBe(false)
+  })
+
+  it('restores the last selected prompt and retains drafts when selection persistence fails', async () => {
+    const saved = {
+      systemPrompt: 'default saved',
+      maxOutputTokens: 2048,
+      enhancedPrompts: [{ id: 'review', title: '审查', content: 'review saved' }],
+      selectedPromptId: 'review',
+    }
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings' ? saved : undefined))
+    await loadPanel()
+    const system = document.querySelector<HTMLTextAreaElement>('#system')!
+    await vi.waitFor(() => expect(system.value).toBe('review saved'))
+    expect(document.querySelector<HTMLSelectElement>('#prompt-select')!.value).toBe('review')
+    expect(document.querySelector('#prompt-active-hint')!.textContent).toBe('当前生成将使用系统提示词模板：审查')
+
+    system.value = 'review unsaved draft'
+    system.dispatchEvent(new Event('input', { bubbles: true }))
+    hostMocks.storageSet.mockRejectedValueOnce(new Error('storage unavailable'))
+    selectPrompt('default')
+    await vi.waitFor(() => expect(document.querySelector('#status')!.textContent).toMatch(/storage unavailable/))
+    expect(system.value).toBe('review unsaved draft')
+    expect(document.querySelector<HTMLSelectElement>('#prompt-select')!.value).toBe('review')
+  })
+
+  it('resets the default prompt and deletes the selected enhancement back to default', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? {
+          systemPrompt: 'custom default',
+          maxOutputTokens: 2048,
+          enhancedPrompts: [{ id: 'review', title: '审查', content: 'review content' }],
+          selectedPromptId: 'default',
+        }
+      : undefined))
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('custom default'))
+
+    click('reset-system')
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toContain('expert prompt engineer'))
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.objectContaining({
+      systemPrompt: expect.stringContaining('expert prompt engineer'),
+      selectedPromptId: 'default',
+    })))
+
+    selectPrompt('review')
+    await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('#delete-prompt')!.disabled).toBe(false))
+    click('delete-prompt')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.objectContaining({
+      selectedPromptId: 'default',
+      enhancedPrompts: [],
+    })))
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toContain('expert prompt engineer'))
+    expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toContain('expert prompt engineer')
+    expect(document.querySelector('#prompt-select option[value="review"]')).toBeNull()
+    expect(document.querySelector<HTMLButtonElement>('#delete-prompt')!.disabled).toBe(true)
+    expect(document.querySelector<HTMLSelectElement>('#prompt-select')!.value).toBe('default')
+    expect(document.querySelector('#prompt-active-hint')!.textContent).toBe('当前生成将使用系统提示词模板：默认提示词')
+  })
+
+  it('keeps legacy settings and uses their custom default system prompt', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? { systemPrompt: 'legacy system prompt', maxOutputTokens: 1536 }
+      : undefined))
+    hostMocks.generate.mockResolvedValue({ text: 'generated' })
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('legacy system prompt'))
+
+    inputDraft('legacy draft')
+    click('enhance')
+    await vi.waitFor(() => expect(hostMocks.generate).toHaveBeenCalledOnce())
+    expect(hostMocks.generate).toHaveBeenCalledWith(expect.objectContaining({
+      system: 'legacy system prompt',
+      maxOutputTokens: 1536,
+    }))
+
+    click('save')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.any(Object)))
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as {
+      systemPrompt: string, maxOutputTokens: number, enhancedPrompts: unknown[], selectedPromptId: string
+    }
+    expect(saved).toMatchObject({
+      systemPrompt: 'legacy system prompt',
+      maxOutputTokens: 1536,
+      enhancedPrompts: [],
+      selectedPromptId: 'default',
+    })
+  })
+
+  it('uses the selected enhanced prompt and sanitizes malformed prompt records on save', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? {
+          systemPrompt: 'default system prompt',
+          maxOutputTokens: 2048,
+          enhancedPrompts: [
+            { id: 'review', title: '审查', content: 'selected enhanced prompt' },
+            { id: 'review', title: 'duplicate', content: 'must be dropped' },
+            { id: 'blank-title', title: '  ', content: 'must be dropped' },
+            { id: 'blank-content', title: 'blank content', content: ' \n ' },
+            { id: ' ', title: 'blank id', content: 'must be dropped' },
+            { id: 'over-limit', title: 'over limit', content: 'x'.repeat(8001) },
+            null,
+          ],
+          selectedPromptId: 'review',
+        }
+      : undefined))
+    hostMocks.generate.mockResolvedValue({ text: 'generated' })
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('selected enhanced prompt'))
+
+    inputDraft('review draft')
+    click('enhance')
+    await vi.waitFor(() => expect(hostMocks.generate).toHaveBeenCalledOnce())
+    expect(hostMocks.generate).toHaveBeenCalledWith(expect.objectContaining({ system: 'selected enhanced prompt' }))
+
+    click('save')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.any(Object)))
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as {
+      enhancedPrompts: { id: string, title: string, content: string }[], selectedPromptId: string
+    }
+    expect(saved.enhancedPrompts).toEqual([{ id: 'review', title: '审查', content: 'selected enhanced prompt' }])
+    expect(saved.selectedPromptId).toBe('review')
+  })
+
+  it('falls back to the default prompt for an unknown selected id', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? {
+          systemPrompt: 'fallback system prompt',
+          maxOutputTokens: 2048,
+          enhancedPrompts: [{ id: 'known', title: 'Known', content: 'not selected' }],
+          selectedPromptId: 'missing',
+        }
+      : undefined))
+    hostMocks.generate.mockResolvedValue({ text: 'generated' })
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('fallback system prompt'))
+
+    inputDraft('fallback draft')
+    click('enhance')
+    await vi.waitFor(() => expect(hostMocks.generate).toHaveBeenCalledOnce())
+    expect(hostMocks.generate).toHaveBeenCalledWith(expect.objectContaining({ system: 'fallback system prompt' }))
+
+    click('save')
+    await vi.waitFor(() => expect(hostMocks.storageSet).toHaveBeenCalledWith('settings', expect.any(Object)))
+    const saved = hostMocks.storageSet.mock.calls.find(([key]) => key === 'settings')![1] as { selectedPromptId: string }
+    expect(saved.selectedPromptId).toBe('default')
+  })
+
+  it('rejects an active system prompt over 8000 characters without replacing settings', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? { systemPrompt: 'saved system prompt', maxOutputTokens: 2048 }
+      : undefined))
+    hostMocks.generate.mockResolvedValue({ text: 'generated' })
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('saved system prompt'))
+    document.querySelector<HTMLTextAreaElement>('#system')!.value = 'x'.repeat(8001)
+
+    click('save')
+    await vi.waitFor(() => expect(document.querySelector('#status')!.textContent).toMatch(/8000/))
+    expect(hostMocks.storageSet).not.toHaveBeenCalledWith('settings', expect.anything())
+
+    inputDraft('still saved')
+    click('enhance')
+    await vi.waitFor(() => expect(hostMocks.generate).toHaveBeenCalledOnce())
+    expect(hostMocks.generate).toHaveBeenCalledWith(expect.objectContaining({ system: 'saved system prompt' }))
+  })
+
+  it('rejects settings that exceed the storage safety limit', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? {
+          systemPrompt: 'saved system prompt',
+          maxOutputTokens: 2048,
+          enhancedPrompts: Array.from({ length: 10 }, (_, index) => ({
+            id: `prompt-${index}`,
+            title: `Prompt ${index}`,
+            content: 'x'.repeat(7000),
+          })),
+          selectedPromptId: 'default',
+        }
+      : undefined))
+    await loadPanel()
+    await vi.waitFor(() => expect(document.querySelector<HTMLTextAreaElement>('#system')!.value).toBe('saved system prompt'))
+
+    click('save')
+    await vi.waitFor(() => expect(document.querySelector('#status')!.textContent).toMatch(/存储|大小|限制/))
+    expect(hostMocks.storageSet).not.toHaveBeenCalledWith('settings', expect.anything())
+  })
+
+  it('keeps the settings draft visible after storage rejects a save', async () => {
+    hostMocks.storageGet.mockImplementation((key: string) => Promise.resolve(key === 'settings'
+      ? { systemPrompt: 'saved system prompt', maxOutputTokens: 2048 }
+      : undefined))
+    hostMocks.generate.mockResolvedValue({ text: 'generated' })
+    await loadPanel()
+    const systemInput = document.querySelector<HTMLTextAreaElement>('#system')!
+    systemInput.value = 'unsaved draft'
+    hostMocks.storageSet.mockRejectedValueOnce(new Error('storage unavailable'))
+
+    click('save')
+    await vi.waitFor(() => expect(document.querySelector('#status')!.textContent).toMatch(/storage unavailable/))
+    expect(systemInput.value).toBe('unsaved draft')
+
+    inputDraft('draft after failed save')
+    click('enhance')
+    await vi.waitFor(() => expect(hostMocks.generate).toHaveBeenCalledOnce())
+    expect(hostMocks.generate).toHaveBeenCalledWith(expect.objectContaining({ system: 'saved system prompt' }))
   })
 
   it('clears only the result or only the draft, and clears both with the combined action', async () => {

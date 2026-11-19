@@ -2028,9 +2028,14 @@ ${safe}
   // panel/main.ts
   var DEFAULT_SETTINGS = {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    maxOutputTokens: 2048
+    maxOutputTokens: 2048,
+    enhancedPrompts: [],
+    selectedPromptId: "default"
   };
   var SETTINGS_KEY = "settings";
+  var DEFAULT_PROMPT_ID = "default";
+  var SYSTEM_PROMPT_LIMIT = 8e3;
+  var SETTINGS_BYTES_LIMIT = 60 * 1024;
   var HISTORY_KEY = "history";
   var HISTORY_LIMIT = 10;
   var HISTORY_FIELD_LIMIT = 8e3;
@@ -2047,9 +2052,21 @@ ${safe}
   var systemInput = document.querySelector("#system");
   var tokensInput = document.querySelector("#tokens");
   var saveButton = document.querySelector("#save");
+  var promptSelect = document.querySelector("#prompt-select");
+  var promptEmpty = document.querySelector("#prompt-empty");
+  var promptActiveHint = document.querySelector("#prompt-active-hint");
+  var addPromptButton = document.querySelector("#add-prompt");
+  var deletePromptButton = document.querySelector("#delete-prompt");
+  var resetSystemButton = document.querySelector("#reset-system");
+  var promptDialog = document.querySelector("#prompt-dialog");
+  var promptTitleInput = document.querySelector("#prompt-title");
+  var promptContentInput = document.querySelector("#prompt-content");
+  var promptCancelButton = document.querySelector("#prompt-cancel");
+  var promptSaveButton = document.querySelector("#prompt-save");
   var historyList = document.querySelector("#history-list");
   var historyEmpty = document.querySelector("#history-empty");
   var settings = DEFAULT_SETTINGS;
+  var promptDrafts = /* @__PURE__ */ new Map();
   var historyEntries = [];
   var requestId = 0;
   var requestInFlight = false;
@@ -2216,24 +2233,162 @@ ${safe}
     renderHistory();
   }
   function sanitizeSettings(value) {
-    if (typeof value !== "object" || value === null) return DEFAULT_SETTINGS;
+    if (typeof value !== "object" || value === null) return { ...DEFAULT_SETTINGS, enhancedPrompts: [] };
     const candidate = value;
+    const systemPrompt = typeof candidate.systemPrompt === "string" && candidate.systemPrompt.trim() !== "" && candidate.systemPrompt.length <= SYSTEM_PROMPT_LIMIT ? candidate.systemPrompt : DEFAULT_SETTINGS.systemPrompt;
+    const enhancedPrompts = [];
+    const seenIds = /* @__PURE__ */ new Set();
+    if (Array.isArray(candidate.enhancedPrompts)) {
+      for (const item of candidate.enhancedPrompts) {
+        if (typeof item !== "object" || item === null) continue;
+        const prompt = item;
+        if (typeof prompt.id !== "string" || prompt.id.trim() === "") continue;
+        if (typeof prompt.title !== "string" || prompt.title.trim() === "") continue;
+        if (typeof prompt.content !== "string" || prompt.content.trim() === "") continue;
+        if (prompt.content.length > SYSTEM_PROMPT_LIMIT) continue;
+        const id = prompt.id.trim();
+        if (id === DEFAULT_PROMPT_ID || seenIds.has(id)) continue;
+        seenIds.add(id);
+        enhancedPrompts.push({ id, title: prompt.title, content: prompt.content });
+      }
+    }
+    const selectedPromptId = typeof candidate.selectedPromptId === "string" && (candidate.selectedPromptId === DEFAULT_PROMPT_ID || seenIds.has(candidate.selectedPromptId.trim())) ? candidate.selectedPromptId.trim() : DEFAULT_PROMPT_ID;
     return {
-      systemPrompt: typeof candidate.systemPrompt === "string" && candidate.systemPrompt.trim() ? candidate.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
-      maxOutputTokens: typeof candidate.maxOutputTokens === "number" ? Math.max(128, Math.min(4e3, Math.round(candidate.maxOutputTokens / 128) * 128)) : DEFAULT_SETTINGS.maxOutputTokens
+      systemPrompt,
+      maxOutputTokens: typeof candidate.maxOutputTokens === "number" && Number.isFinite(candidate.maxOutputTokens) ? Math.max(128, Math.min(4e3, Math.round(candidate.maxOutputTokens / 128) * 128)) : DEFAULT_SETTINGS.maxOutputTokens,
+      enhancedPrompts,
+      selectedPromptId
     };
   }
+  function selectedSystemPrompt(value) {
+    if (value.selectedPromptId === DEFAULT_PROMPT_ID) {
+      return promptDrafts.get(DEFAULT_PROMPT_ID) ?? value.systemPrompt;
+    }
+    const prompt = value.enhancedPrompts.find((candidate) => candidate.id === value.selectedPromptId);
+    return promptDrafts.get(value.selectedPromptId) ?? prompt?.content ?? DEFAULT_SYSTEM_PROMPT;
+  }
+  function currentPromptContent() {
+    return promptDrafts.get(settings.selectedPromptId) ?? selectedSystemPrompt(settings);
+  }
+  function promptTitle(id) {
+    if (id === DEFAULT_PROMPT_ID) return "\u9ED8\u8BA4\u63D0\u793A\u8BCD";
+    return settings.enhancedPrompts.find((prompt) => prompt.id === id)?.title ?? "\u9ED8\u8BA4\u63D0\u793A\u8BCD";
+  }
+  function renderPromptSelect() {
+    const defaultOption = document.createElement("option");
+    defaultOption.value = DEFAULT_PROMPT_ID;
+    defaultOption.textContent = "\u9ED8\u8BA4\u63D0\u793A\u8BCD";
+    const enhancedOptions = settings.enhancedPrompts.map((prompt) => {
+      const option = document.createElement("option");
+      option.value = prompt.id;
+      option.textContent = prompt.title;
+      return option;
+    });
+    promptSelect.replaceChildren(defaultOption, ...enhancedOptions);
+    promptSelect.value = settings.selectedPromptId;
+    promptEmpty.hidden = settings.enhancedPrompts.length > 0;
+    promptActiveHint.textContent = `\u5F53\u524D\u751F\u6210\u5C06\u4F7F\u7528\u7CFB\u7EDF\u63D0\u793A\u8BCD\u6A21\u677F\uFF1A${promptTitle(settings.selectedPromptId)}`;
+    deletePromptButton.disabled = settings.selectedPromptId === DEFAULT_PROMPT_ID;
+    resetSystemButton.disabled = settings.selectedPromptId !== DEFAULT_PROMPT_ID;
+    systemInput.value = currentPromptContent();
+  }
+  async function selectPrompt(id) {
+    if (id === settings.selectedPromptId) return;
+    const nextSettings = { ...settings, selectedPromptId: id };
+    if (!await persistSettings(nextSettings)) {
+      promptSelect.value = settings.selectedPromptId;
+      return;
+    }
+    renderPromptSelect();
+    setStatus("\u5DF2\u5207\u6362\u7CFB\u7EDF\u63D0\u793A\u8BCD\u3002");
+  }
+  function newPromptId() {
+    let id = "";
+    do {
+      id = `prompt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    } while (settings.enhancedPrompts.some((prompt) => prompt.id === id));
+    return id;
+  }
+  function closePromptDialog() {
+    if (typeof promptDialog.close === "function") promptDialog.close();
+    else promptDialog.open = false;
+  }
+  function openPromptDialog() {
+    promptTitleInput.value = "";
+    promptContentInput.value = "";
+    try {
+      promptDialog.showModal();
+    } catch {
+      promptDialog.open = true;
+    }
+  }
+  async function addPrompt() {
+    const title = promptTitleInput.value;
+    const content = promptContentInput.value;
+    if (title.trim() === "") {
+      setStatus("\u63D0\u793A\u8BCD\u6807\u9898\u4E0D\u80FD\u4E3A\u7A7A\u3002", "error");
+      return;
+    }
+    if (content.trim() === "") {
+      setStatus("\u63D0\u793A\u8BCD\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002", "error");
+      return;
+    }
+    if (content.length > SYSTEM_PROMPT_LIMIT) {
+      setStatus(`\u7CFB\u7EDF\u63D0\u793A\u8BCD\u4E0D\u80FD\u8D85\u8FC7 ${SYSTEM_PROMPT_LIMIT} \u4E2A\u5B57\u7B26\u3002`, "error");
+      return;
+    }
+    const prompt = { id: newPromptId(), title, content };
+    const nextSettings = {
+      ...settings,
+      enhancedPrompts: [...settings.enhancedPrompts, prompt],
+      selectedPromptId: prompt.id
+    };
+    if (!await persistSettings(nextSettings)) return;
+    promptDrafts.delete(prompt.id);
+    closePromptDialog();
+    renderPromptSelect();
+    setStatus("\u589E\u5F3A\u63D0\u793A\u8BCD\u5DF2\u6DFB\u52A0\u3002");
+  }
+  async function deletePrompt() {
+    const id = settings.selectedPromptId;
+    if (id === DEFAULT_PROMPT_ID) return;
+    const nextSettings = {
+      ...settings,
+      enhancedPrompts: settings.enhancedPrompts.filter((prompt) => prompt.id !== id),
+      selectedPromptId: DEFAULT_PROMPT_ID
+    };
+    if (!await persistSettings(nextSettings)) return;
+    promptDrafts.delete(id);
+    renderPromptSelect();
+    setStatus("\u589E\u5F3A\u63D0\u793A\u8BCD\u5DF2\u5220\u9664\u3002");
+  }
+  async function persistSettings(next) {
+    if (byteLength(JSON.stringify(next)) > SETTINGS_BYTES_LIMIT) {
+      setStatus(`\u8BBE\u7F6E\u8FC7\u5927\uFF0C\u672A\u4FDD\u5B58\uFF08\u9650\u5236 ${SETTINGS_BYTES_LIMIT} \u5B57\u8282\uFF09\u3002`, "error");
+      return false;
+    }
+    try {
+      await host.storage.set(SETTINGS_KEY, { ...next });
+      settings = next;
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
+      setStatus(`\u4FDD\u5B58\u8BBE\u7F6E\u5931\u8D25\uFF08${message}\uFF09\u3002`, "error");
+      return false;
+    }
+  }
   function showSettings() {
-    systemInput.value = settings.systemPrompt;
     tokensInput.value = String(settings.maxOutputTokens);
+    renderPromptSelect();
   }
   async function loadSettings() {
     try {
       settings = sanitizeSettings(await host.storage.get(SETTINGS_KEY));
     } catch {
-      settings = DEFAULT_SETTINGS;
+      settings = { ...DEFAULT_SETTINGS, enhancedPrompts: [] };
       setStatus("\u65E0\u6CD5\u8BFB\u53D6\u5DF2\u4FDD\u5B58\u7684\u8BBE\u7F6E\uFF0C\u5F53\u524D\u4F7F\u7528\u9ED8\u8BA4\u8BBE\u7F6E\u3002", "error");
     }
+    promptDrafts.clear();
     showSettings();
   }
   async function enhance() {
@@ -2251,7 +2406,7 @@ ${safe}
     try {
       const response = await host.generate({
         prompt: frameUserPrompt(text),
-        system: settings.systemPrompt,
+        system: selectedSystemPrompt(settings),
         maxOutputTokens: settings.maxOutputTokens
       });
       if (currentRequest !== requestId) return;
@@ -2293,15 +2448,48 @@ ${safe}
       setStatus("\u8F93\u51FA\u4EE4\u724C\u6570\u5FC5\u987B\u5728 128 \u5230 4000 \u4E4B\u95F4\u3002", "error");
       return;
     }
-    settings = sanitizeSettings({ systemPrompt: systemInput.value, maxOutputTokens });
-    try {
-      await host.storage.set(SETTINGS_KEY, { ...settings });
+    const content = systemInput.value;
+    if (content.trim() === "") {
+      setStatus("\u7CFB\u7EDF\u63D0\u793A\u8BCD\u4E0D\u80FD\u4E3A\u7A7A\u3002", "error");
+      return;
+    }
+    if (content.length > SYSTEM_PROMPT_LIMIT) {
+      setStatus(`\u7CFB\u7EDF\u63D0\u793A\u8BCD\u4E0D\u80FD\u8D85\u8FC7 ${SYSTEM_PROMPT_LIMIT} \u4E2A\u5B57\u7B26\u3002`, "error");
+      return;
+    }
+    const nextSettings = settings.selectedPromptId === DEFAULT_PROMPT_ID ? { ...settings, systemPrompt: content, maxOutputTokens } : {
+      ...settings,
+      maxOutputTokens,
+      enhancedPrompts: settings.enhancedPrompts.map((prompt) => prompt.id === settings.selectedPromptId ? { ...prompt, content } : prompt)
+    };
+    const sanitizedSettings = sanitizeSettings(nextSettings);
+    if (await persistSettings(sanitizedSettings)) {
+      promptDrafts.delete(settings.selectedPromptId);
       showSettings();
       setStatus("\u8BBE\u7F6E\u5DF2\u4FDD\u5B58\u3002");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
-      setStatus(`\u4FDD\u5B58\u8BBE\u7F6E\u5931\u8D25\uFF08${message}\uFF09\u3002`, "error");
     }
+  });
+  systemInput.addEventListener("input", () => {
+    promptDrafts.set(settings.selectedPromptId, systemInput.value);
+  });
+  addPromptButton.addEventListener("click", openPromptDialog);
+  promptCancelButton.addEventListener("click", closePromptDialog);
+  promptSaveButton.addEventListener("click", () => {
+    void addPrompt();
+  });
+  deletePromptButton.addEventListener("click", () => {
+    void deletePrompt();
+  });
+  promptSelect.addEventListener("change", () => {
+    void selectPrompt(promptSelect.value);
+  });
+  resetSystemButton.addEventListener("click", async () => {
+    if (settings.selectedPromptId !== DEFAULT_PROMPT_ID) return;
+    const nextSettings = { ...settings, systemPrompt: DEFAULT_SYSTEM_PROMPT };
+    if (!await persistSettings(nextSettings)) return;
+    promptDrafts.delete(DEFAULT_PROMPT_ID);
+    showSettings();
+    setStatus("\u5DF2\u6062\u590D\u9ED8\u8BA4\u7CFB\u7EDF\u63D0\u793A\u8BCD\u3002");
   });
   draft.addEventListener("input", () => {
     if (result.textContent) setStatus("\u63D0\u793A\u8BCD\u5DF2\u66F4\u6539\uFF1B\u5F53\u524D\u663E\u793A\u7684\u7ED3\u679C\u5BF9\u5E94\u5148\u524D\u7684\u63D0\u793A\u8BCD\u3002");
